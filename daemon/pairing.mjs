@@ -1,6 +1,8 @@
 // Psyntient.io device pairing. Implements Plane B of daemon/docs/AUTH_FLOW.md
-// (v1.0, "source of truth" — read that file for the full protocol; this is
-// an implementation of it, not a second spec).
+// (v1.0, "source of truth" — read that file for the full protocol) plus
+// daemon/docs/MIGRATION_GUIDE.md's additions on top of it (404 added to
+// the treat-as-revoked bucket, success page redirects to the Interface).
+// This is an implementation of those specs, not a second one.
 //
 // Filename resolution, settled by AUTH_FLOW.md section 7: the canonical
 // pairing file is ~/.psyntient/node.key (node_token/node_id/context_id/
@@ -8,34 +10,24 @@
 // this machine earlier belong to AUTH_FLOW.md's explicitly deprecated
 // install-code/device-code model ("remain live only for machines paired
 // before the /link-node flow") — left untouched (they're not debris, just
-// superseded), but no longer treated as pairing state. This Node is
-// unpaired under the current model until it goes through /link-node for
-// real.
+// superseded), but no longer treated as pairing state.
 //
-// NOT implemented here (real, scoped gaps, not oversights):
-// - Continuous ~5-minute heartbeat loop (AUTH_FLOW.md section 3.1). This
-//   daemon has no persistent background process today — daemon/launch.mjs
-//   is a one-shot script per launch, unlike the Gateway (real launchd
-//   service) or the Interface (long-running child process). Heartbeat is
-//   only called once at launch and once immediately after a successful
-//   pairing, matching the spec's minimums but not its steady-state
-//   requirement. Building continuous heartbeating means building a real
-//   persistent daemon process first — a genuine architecture decision,
-//   not implemented speculatively here.
-// - Plane C (Interface <-> daemon local session, AUTH_FLOW.md section 4:
-//   /pair-interface, noetic_session cookie). Separate concern from Node
-//   pairing (this file) — the spec itself notes an already-paired Node
-//   does not need this to keep chatting. Deferred as its own follow-up.
-// - Revocation handling beyond wiping node.key on 401/403 from heartbeat
-//   (section 3.1's table) — there's no continuous heartbeat loop yet to
-//   catch it in steady state, only at the moments heartbeat() is actually
-//   called.
+// Continuous ~5-minute heartbeat loop: built separately, see
+// daemon/heartbeat-loop.mjs + daemon/heartbeat-control.mjs. This module
+// only exposes the single heartbeat() call the loop uses.
+//
+// NOT implemented here (real, scoped gap, not an oversight): Plane C
+// (Interface <-> daemon local session, AUTH_FLOW.md section 4:
+// /pair-interface, noetic_session cookie). Separate concern from Node
+// pairing (this file) — the spec itself notes an already-paired Node
+// does not need this to keep chatting. Deferred as its own follow-up.
 import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { openInBrowser } from "./open-browser.mjs";
+import { url as interfaceUrl } from "./interface-control.mjs";
 
 const PSYNTIENT_DIR = path.join(os.homedir(), ".psyntient");
 const NODE_KEY_PATH = path.join(PSYNTIENT_DIR, "node.key");
@@ -69,8 +61,14 @@ function unpair(reason) {
   console.log(`Node unpaired: ${reason}`);
 }
 
-function htmlPage(message) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${message}</p></body></html>`;
+// redirectTo: per AUTH_FLOW.md 2.4 point 3 and MIGRATION_GUIDE.md section
+// 2.6, the success page redirects to the local Interface after showing
+// the confirmation — cancel/error pages don't redirect anywhere.
+function htmlPage(message, redirectTo) {
+  const redirectScript = redirectTo
+    ? `<script>setTimeout(function(){location.href=${JSON.stringify(redirectTo)}},1200)</script>`
+    : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${message}</p>${redirectScript}</body></html>`;
 }
 
 // Opens the browser to /link-node and listens on the loopback callback
@@ -125,7 +123,7 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
         paired_at: new Date().toISOString(),
       });
       res.writeHead(200, { "content-type": "text/html" });
-      res.end(htmlPage("Paired — you can close this tab."));
+      res.end(htmlPage("Paired — taking you to the Interface...", interfaceUrl()));
       finish(() => resolve({ ok: true, node_id, context_id }));
     });
 
@@ -156,8 +154,10 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
   });
 }
 
-// AUTH_FLOW.md 3.1. Single call, not the continuous loop (see module
-// header). 401/403 wipes node.key per the spec's non-negotiable rule 5;
+// AUTH_FLOW.md 3.1 + Migration Guide section 4's status-code table (the
+// migration guide adds 404 "Node record missing" to the same
+// treat-as-revoked bucket that AUTH_FLOW.md only listed 401/403 for).
+// 401/403/404 all wipe node.key per the spec's non-negotiable rule 5;
 // 5xx/network is transient and left as-is for the caller to ignore.
 export async function heartbeat() {
   const key = readNodeKey();
@@ -178,7 +178,7 @@ export async function heartbeat() {
     return { ok: false, transient: true, error: err.message };
   }
 
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401 || res.status === 403 || res.status === 404) {
     const body = await res.json().catch(() => ({}));
     unpair(`heartbeat returned ${res.status}${body?.error ? ` (${body.error})` : ""}`);
     return { ok: false, unpaired: true, status: res.status };

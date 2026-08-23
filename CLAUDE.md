@@ -168,9 +168,17 @@ vice versa).
 
 **Full protocol:** `daemon/docs/AUTH_FLOW.md` (v1.0, "source of truth" —
 supersedes any earlier pairing description anywhere else, including
-older text that used to be in this file). Read that file first for
-anything pairing/auth related; this section is implementation notes on
-top of it, not a second spec.
+older text that used to be in this file), plus `daemon/docs/MIGRATION_GUIDE.md`
+for the deltas against it (found no old-flow code to migrate — Phase G
+was built fresh against AUTH_FLOW.md directly — but the guide's checklist
+caught two real gaps, both fixed 2026-08-23: `heartbeat()` now treats
+`404` the same as `401`/`403` — the guide adds "Node record missing" to
+the same treat-as-revoked bucket AUTH_FLOW.md only listed 401/403 for —
+and the pairing success page now actually redirects to the local
+Interface after a 1.2s pause, rather than just showing a static "Paired"
+message with no redirect). Read AUTH_FLOW.md first for anything pairing/
+auth related; this section is implementation notes on top of both docs,
+not a third spec.
 
 **Filename question, resolved by AUTH_FLOW.md section 7:** the canonical
 file is `~/.psyntient/node.key` (`node_token`/`node_id`/`context_id`/
