@@ -195,6 +195,22 @@ gate; building the real one needs the actual protocol spec.
   `Cortex/Open-Claw/packages/gateway-protocol/src/version.ts` against
   webclaw's hardcoded value whenever either side updates.
 
+### Known issue: live stream display can stick on "Generating..."
+
+Upstream bug (not our protocol patch, not the Gateway/agent/daemon) in
+`apps/webclaw/src/screens/chat/hooks/use-chat-stream.ts`. Its `EventSource`
+reconnects on every session load (opens a generic-friendlyId stream, then
+immediately replaces it with a session-key-specific one), and if an agent
+run's `final` event arrives during that reconnect window, the UI never
+gets the event that would trigger `refreshHistory()` — it sticks on
+"Generating..." even though the run completed. **Data is never lost or
+wrong** — `GET /api/history` always has the real, complete conversation;
+a page reload always shows it correctly. Confirmed via direct API checks
+against a stuck session (2026-08-23). Deferred, not fixed — the merge/dedup
+logic in that file is substantial (~700 lines) and worth a dedicated pass
+rather than a rushed patch. Revisit once the rebrand pass is further along
+if it's still a real annoyance.
+
 ### Safe WebClaw update procedure
 
 Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying
