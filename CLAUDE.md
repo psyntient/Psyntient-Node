@@ -217,6 +217,44 @@ logic in that file is substantial (~700 lines) and worth a dedicated pass
 rather than a rushed patch. Revisit once the rebrand pass is further along
 if it's still a real annoyance.
 
+### Production serving: daemon/interface-control.mjs
+
+The launcher (`daemon/launch.mjs`) does **not** run `vite dev` — that's
+dev-only tooling. It runs a real production build
+(`pnpm build` in `Noetic_Interface/web/`, output at
+`apps/webclaw/dist/server/server.js`) served via `vite preview` as a
+detached background child process, tracked by PID file
+(`~/.psyntient/interface.pid`), fixed port `3210` (distinct from the `3000`
+used for ad-hoc dev testing so both can run at once without conflict).
+Logs at `logs/interface.log`.
+
+**This is deliberately NOT a launchd/systemd service yet** — no
+install/start/stop/status parity with `daemon/openclaw-control.mjs`'s
+Gateway management. That's real follow-up scope, not done. The
+`ensureRunning()`/`stop()`/`url()` API in `interface-control.mjs` is
+written so upgrading to a real service later doesn't change callers.
+
+**Gotcha found by testing, not documented anywhere obvious:** `vite
+preview` binds IPv6 `::1` only by default — `curl`/`fetch` against
+`127.0.0.1` gets a bare connection refused even though the server is
+genuinely up and `localhost` works fine. Must pass `--host 127.0.0.1`
+explicitly. If a future change to how the Interface is served drops this
+flag, health checks will silently fail to connect even though the process
+is running - don't assume "not listening on 127.0.0.1" means "not
+running."
+
+**Gateway token wiring:** `getGatewayEnv()` in `interface-control.mjs`
+reads `gateway.auth.token` directly from `openclaw.json` — the CLI's own
+`gateway status --json` redacts it (`__OPENCLAW_REDACTED__`), so this is
+the one place in the daemon layer that reads the raw config file instead
+of going through `openclaw-cli.mjs`'s `runCli()`.
+
+**Also observed:** the same transient Gateway-WS-reconnect flakiness
+documented above for dev mode also shows up in this production-preview
+serving path (a `ping` briefly returned "Timed out waiting for
+connect.challenge event" once, then was consistently healthy again within
+seconds). Same category, same non-issue for data integrity.
+
 ### Safe WebClaw update procedure
 
 Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying

@@ -9,10 +9,13 @@
 //    checks OpenClaw's own auth store, not a local flag, so it can't get
 //    out of sync with reality. (Product decision — this is the same
 //    contract Settings must honor once Phase E adds key rotation there.)
-// 3. Open the Interface in the system default browser — no embedded
-//    webview, so behavior stays device-agnostic.
+// 3. Ensure the Noetic Interface is up, then open it in the system default
+//    browser — no embedded webview, so behavior stays device-agnostic. If
+//    the Interface fails to start for any reason, fall back to the raw
+//    OpenClaw dashboard rather than leaving the user with nothing.
 import { spawn } from "node:child_process";
-import { ensureRunning, paths } from "./openclaw-control.mjs";
+import { ensureRunning as ensureGatewayRunning, paths as gatewayPaths } from "./openclaw-control.mjs";
+import { ensureRunning as ensureInterfaceRunning, url as interfaceUrl } from "./interface-control.mjs";
 import { hasAnyProvider, setProviderKey } from "./providers.mjs";
 import { promptForProviderKey, alert } from "./prompt-macos.mjs";
 import { ensurePairedNotice } from "./pairing.mjs";
@@ -51,7 +54,7 @@ async function ensureProviderKeyBlocking() {
 
 async function main() {
   console.log("Psyntient Node: checking Gateway...");
-  const { interfaceUrl: initialUrl } = await ensureRunning();
+  const gatewayStatus = await ensureGatewayRunning();
 
   const ready = await ensureProviderKeyBlocking();
   if (!ready) {
@@ -62,8 +65,15 @@ async function main() {
   // Order matters: BYO key gate first, pairing second — see CLAUDE.md.
   await ensurePairedNotice();
 
-  const { interfaceUrl } = await ensureRunning();
-  const url = interfaceUrl || initialUrl || `http://127.0.0.1:${paths.GATEWAY_PORT}/`;
+  console.log("Starting the Noetic Interface...");
+  let url;
+  try {
+    await ensureInterfaceRunning();
+    url = interfaceUrl();
+  } catch (err) {
+    console.error(`Noetic Interface failed to start (${err.message}) — falling back to the OpenClaw dashboard.`);
+    url = gatewayStatus.interfaceUrl || `http://127.0.0.1:${gatewayPaths.GATEWAY_PORT}/`;
+  }
   console.log(`Opening ${url}`);
   openInBrowser(url);
 }
