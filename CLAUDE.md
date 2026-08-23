@@ -88,13 +88,19 @@ service entrypoint.
 Clone `https://github.com/ibelick/webclaw` into `Noetic_Interface/web/`.
 Do not build a custom chat UI from scratch — rebrand WebClaw instead.
 
-- **Rebrand**, don't replace: theme tokens live in `Noetic_Interface/branding/`
-  (see `theme.json` — dark ink backgrounds, cream text, gold accents; see
-  full palette/type/avatar/motion spec there). Never ship WebClaw's default
-  purple/indigo-on-white look.
+- **Rebrand**, don't replace: full spec is
+  `Noetic_Interface/branding/BRANDING.md` ("Psyntient Ink & Gold v1.0" —
+  read that first, it's authoritative over anything summarized here);
+  `theme.json` in the same directory is a machine-readable token subset of
+  it. Logo/avatar source images are in `Noetic_Interface/branding/assets/`.
+  Never ship WebClaw's default look. Applied to the `Noetic_Interface/web/`
+  checkout on the `psyntient` branch (commit `6e27ec7`, 2026-08-23) — see
+  that commit message for exactly what was and wasn't touched yet
+  (Settings dialog, Sessions→Projects rename, empty-state logo, and a
+  radius/motion audit are still open).
 - **Keep** WebClaw's strong UX pieces: voice-to-text, streaming text
   appearance/highlight, settings page, chat threads. Trim excess chrome.
-  Map WebClaw "threads" to "Projects" + open chat.
+  Map WebClaw "threads" to "Projects" + open chat (not yet done).
 - **No separate agent stack.** The Interface is a pure client of the
   already-running bundled Gateway — wire it with Gateway URL + token only.
   No product email/password login, ever.

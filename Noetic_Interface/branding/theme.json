@@ -1,46 +1,59 @@
 {
-  "name": "Psyntient Noetic Interface theme",
-  "notes": "Rebrand target for the WebClaw fork in Noetic_Interface/web/. Never ship WebClaw's default purple/indigo-on-white look.",
+  "name": "Psyntient Ink & Gold v1.0",
+  "source": "BRANDING.md (this directory) — full spec, read that first",
+  "notes": "Supersedes the earlier placeholder theme.json from Phase C. Never ship purple/indigo-on-white; the Node ships dark-only.",
   "colors": {
-    "background": {
-      "ink": "#0a0a0f",
-      "inkAlt": "#0F172A"
-    },
-    "text": {
-      "cream": "#f8f7f2"
-    },
-    "accent": {
-      "gold": "#f5d9a8",
-      "goldBright": "#f5c76a",
-      "goldRose": "#f5b89e"
-    }
+    "background": "#0C0A1D",
+    "foreground": "#FEF4E3",
+    "card": "#14122B",
+    "popover": "#14122B",
+    "primary": "#EEBC4A",
+    "primaryForeground": "#0C0A1D",
+    "secondary": "#191731",
+    "muted": "#191731",
+    "mutedForeground": "#E3D6BE",
+    "accent": "#241737",
+    "border": "#302F4B",
+    "input": "#302F4B",
+    "ring": "#EEBC4A",
+    "destructive": "#E5484D",
+    "goldLight": "#F7DC9A",
+    "goldDeep": "#E38F00",
+    "goldPressed": "#D9A233"
   },
   "typography": {
-    "ui": ["Inter", "Outfit", "SF Pro"],
-    "mono": ["JetBrains Mono"],
-    "monoUsage": "paths and data"
+    "display": "Instrument Serif",
+    "displayFallback": "ui-serif, Georgia, serif",
+    "displayWeight": 400,
+    "body": "Work Sans",
+    "bodyFallback": "ui-sans-serif, system-ui",
+    "mono": "IBM Plex Mono",
+    "monoUsage": "kickers, labels, data, paths"
   },
   "avatar": {
-    "concept": "calm wise magical elf",
-    "avoid": "cartoonish"
+    "concept": "calm wise magical elf, arcane scholar",
+    "avoid": "cartoonish",
+    "files": {
+      "icon": "assets/noetic-elf-icon.png (+ -256/-128/-64/-32)",
+      "avatar": "assets/noetic-elf-avatar.png (+ -512/-256/-128/-64/-32)"
+    },
+    "usage": "avatar (no vignette) for in-chat message avatar; icon (vignetted) for a chat launcher, never the sidebar logo"
   },
-  "motion": {
-    "style": "subtle",
-    "signatureMoment": "gold glints at insights/value moments"
+  "logo": {
+    "mark": "assets/psyntient-mark.png (+ -512/-128/-32) — transparent, symbol only",
+    "lockup": "assets/psyntient-logo.png — full lockup, cream bg intentional, splash/installer/about only",
+    "gapNote": "no true 512px mark source yet — 512 variant is upscaled from a 263px crop; regenerate from a higher-res source lockup if a crisp 512 is needed"
   },
-  "uxToKeepFromWebClaw": [
-    "voice-to-text",
-    "streaming text appearance/highlight",
-    "settings page",
-    "chat threads"
-  ],
-  "uxMapping": {
-    "webclawThreads": "Projects + open chat"
+  "geometry": {
+    "cards": "rounded-3xl (20px), hairline 1px border",
+    "buttons": "fully rounded pill (9999px) — signature",
+    "inputs": "rounded-xl"
   },
-  "chromeGuidance": "trim excess chrome beyond what's listed above",
-  "wiring": {
-    "mode": "gateway-client-only",
-    "auth": "gateway URL + token only, no product email/password login",
-    "defaultGatewayUrl": "http://127.0.0.1:18789/"
-  }
+  "motion": "slow, eased, never springy — 200ms color/opacity, 300ms cubic-bezier(.22,1,.36,1) transform",
+  "rules": [
+    "exactly one gold CTA per view",
+    "muted text is warm cream at lower opacity, never gray",
+    "elf only in Noetic Interface chat; mark everywhere else",
+    "no white flash on cold start"
+  ]
 }
