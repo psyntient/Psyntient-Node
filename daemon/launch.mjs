@@ -18,6 +18,7 @@ import { ensureRunning as ensureInterfaceRunning, url as interfaceUrl } from "./
 import { hasAnyProvider, setProviderKey } from "./providers.mjs";
 import { promptForProviderKey, alert } from "./prompt-macos.mjs";
 import { pairIfNeeded } from "./pairing.mjs";
+import { ensureRunning as ensureHeartbeatRunning } from "./heartbeat-control.mjs";
 import { openInBrowser } from "./open-browser.mjs";
 
 // Returns true once a usable key is configured, false if the user declined.
@@ -46,6 +47,12 @@ async function ensureProviderKeyBlocking() {
 }
 
 async function main() {
+  // Idempotent, synchronous, spawns a detached long-running process that
+  // outlives this launch script — safe to call on every launch. Started
+  // first since it's independent of the Gateway/key/pairing checks below
+  // (Node<->psyntient.io identity has nothing to do with LLM keys).
+  ensureHeartbeatRunning();
+
   console.log("Psyntient Node: checking Gateway...");
   const gatewayStatus = await ensureGatewayRunning();
 

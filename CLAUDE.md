@@ -192,24 +192,42 @@ paths both reject/cancel correctly. Then called `heartbeat()` with the
 fake token against the **real** `https://psyntient.io/api/public/nodes/heartbeat`
 endpoint — it correctly returned 401 "Invalid or revoked token", which
 correctly triggered wiping `node.key` per the spec's non-negotiable rule
-5. No real pairing was completed (all test data was synthetic/rejected);
-this Node remains unpaired.
+5. No real pairing was completed by that test itself (all test data was
+synthetic/rejected) — but real pairing **did** happen minutes later, when
+the user completed the actual browser sign-in/approval during a
+background integration test. Confirmed via a genuine `heartbeat()` call:
+`ok: true`, correct `node_id`/`context_id`, `vault: null` (correct, Phase
+H not done). **This Node is actually paired.**
 
-**Real, scoped gaps — not oversights, see `daemon/pairing.mjs`'s module
-header for the full reasoning:**
-- **No continuous ~5-minute heartbeat loop** (AUTH_FLOW.md 3.1's steady-
-  state requirement). `heartbeat()` is only called once at launch and
-  once right after a successful pairing. This daemon has no persistent
-  background process today — unlike the Gateway (real launchd service,
-  pre-existing) or the Interface (long-running child process,
-  `interface-control.mjs`), `daemon/launch.mjs` is a one-shot script per
-  launch. Building continuous heartbeating means building a real
-  persistent daemon process first — a genuine architecture decision, not
-  implemented speculatively here. Revocation is only caught at the
-  moments `heartbeat()` actually runs, not continuously.
-- **Plane C (Interface ↔ daemon local session, AUTH_FLOW.md section 4:
-  `/pair-interface`, `noetic_session` cookie) is not built.** Separate
-  concern from Node pairing above — the spec itself notes an
+### Continuous heartbeat loop (closed, 2026-08-23)
+
+Was a real, documented gap — now built. `daemon/heartbeat-loop.mjs` is the
+actual long-running process (ticks `heartbeat()` at startup, then every
+`INTERVAL_MS` = 5 minutes, matching AUTH_FLOW.md 3.1's "keep it ≤5 min"
+revocation-latency requirement; keeps ticking even while unpaired,
+checking `isPaired()` each cycle, so a pairing completed later via the
+non-blocking `pairIfNeeded()` is picked up automatically without
+restarting the loop). `daemon/heartbeat-control.mjs` manages it as a
+detached background process with PID-file tracking
+(`~/.psyntient/heartbeat.pid`, logs at `logs/heartbeat.log`) — **the same
+pattern as `interface-control.mjs`**, deliberately not a launchd/systemd
+service yet (shared follow-up scope with the Interface's own version of
+this gap, see section 7 above). `ensureRunning()` is idempotent and
+synchronous; `daemon/launch.mjs` calls it unconditionally at the very top
+of `main()`, before the Gateway/key/pairing checks, since Node↔psyntient.io
+heartbeating has nothing to do with LLM keys.
+
+Verified for real: started the loop, confirmed an immediate genuine
+heartbeat succeeded against the live API (`heartbeat ok` in the log),
+confirmed a second `ensureRunning()` call correctly detected the running
+process and did not spawn a duplicate, confirmed `stop()` terminates it
+cleanly (SIGTERM, logged, PID file removed, no stray process), then ran
+the full `daemon/launch.mjs` flow end-to-end and confirmed it starts the
+loop correctly as part of normal launch.
+
+**Plane C (Interface ↔ daemon local session, AUTH_FLOW.md section 4:
+`/pair-interface`, `noetic_session` cookie) is still not built.** Separate
+concern from Node pairing above — the spec itself notes an
   already-paired Node doesn't need this to keep chatting. Deferred as its
   own follow-up, not part of this pass.
 
