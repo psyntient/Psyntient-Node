@@ -7,8 +7,7 @@ node_modules/
 # own remote/history. Cortex/versions.json tracks which ref is installed.
 Cortex/Open-Claw/
 Cortex/Cortex_Agent/
-Noetic_Interface/web/*
-!Noetic_Interface/web/.gitkeep
+Noetic_Interface/web/
 
 # Runtime/private data — not part of the versioned skeleton
 Neural_Vault/local/*
