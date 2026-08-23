@@ -508,5 +508,70 @@ Plan.
 
 ---
 
+## 9. Working_Memory (Phase I, complete 2026-08-23)
+
+`daemon/working-memory.mjs` implements `Psyntient_Node_Project_v2.md`
+§2/§5's `Working_Memory/` layout:
+
+```
+Working_Memory/
+├── chat_context/<thread_id>/     # messages.jsonl, .meta.json
+└── cortex_projects/<project_id>/ # notes.md, scratch/, logs/
+```
+
+Two distinct things live here — don't conflate them:
+
+- **`chat_context/<thread_id>/`** — a materialized **mirror** of a
+  WebClaw session's transcript (`thread_id` = WebClaw's `friendlyId`).
+  The Gateway's own session store (`~/.psyntient/openclaw-state/`)
+  remains ground truth; this directory exists so the transcript
+  survives in a stable plain-file format for the Cortex Agent and
+  future Noetic_API to read directly, and so it physically lives in
+  Working_Memory per the spec. Kept in sync automatically — no user
+  action needed. **`/api/working-memory`** (Interface route) fetches
+  `chat.history` from the Gateway (ground truth, not a client-supplied
+  payload) and shells out to `working-memory.mjs sync-thread`. Wired
+  from `chat-screen.tsx` via a `useEffect` on `displayMessages` (fires
+  once a turn is no longer in flight) plus a 20s idle poll as a
+  backstop — **not** the SSE stream's `'final'` event. Testing found
+  that event unreliable in this app (see "Known issue" note in section
+  7 above, which documents the same general area as already fragile):
+  instrumented the live EventSource and confirmed it only ever
+  delivered `connect.challenge`/`health`/`presence`/`tick`, never
+  `chat`/`agent`/`chat.history`, despite the UI correctly showing
+  completed replies via some other already-existing update path in this
+  codebase. Don't re-wire this to `onChatEvent`'s `'final'` state on the
+  assumption it "should" work — it was tried and confirmed unreliable
+  here.
+- **`cortex_projects/<project_id>/`** — a heavier, deliberate Vault-backed
+  "Project" per §5's lifecycle: create → scaffold into Working_Memory →
+  active work → sync back to `Neural_Vault/Devices/<device_name>/<project_id>/`
+  → erase the working copy (Vault copy remains). Device name is
+  `os.hostname()` via `daemon/device-name.mjs` (shared with
+  `pairing.mjs`, so the two never drift). `createProject()`/
+  `syncProjectToVault()`/`eraseProjectWorkingCopy()`/`getProjectStatus()`
+  are real and CLI-tested (`node daemon/working-memory.mjs
+  create-project|sync-project|erase-project|project-status <id>`), but
+  **nothing calls them yet** — WebClaw has no "create a project" UI
+  action (its sidebar "Projects" are still just renamed Gateway
+  sessions, one per `chat_context` thread, not Vault-backed projects).
+  Same honest-stub posture as `vault.mjs`'s `switchToCloud()` in Phase
+  H — don't build fake UI for this; wire it for real once there's an
+  actual "create a project" flow to hang it off.
+
+Sync-to-Vault field mapping (a deliberate call, not spec-literal — the
+spec doesn't define one): `notes.md` → Vault `notes/`, `logs/` → Vault
+`sessions/`, `scratch/` → Vault `exports/`. Vault `analyses/` is
+scaffolded but nothing currently writes to it.
+
+`eraseProjectWorkingCopy()`'s safety guard checks `.project.json`'s
+`lastSyncedAt` field, not mere file existence — `createProject()`
+already stamps an empty `.project.json` when it scaffolds the Vault
+side, so checking existence alone would never actually refuse (a real
+bug found and fixed during Phase I testing). If this function is ever
+touched again, keep that distinction.
+
+---
+
 See `Psyntient_Node_Development_Plan.md` and `Psyntient_Node_Project_v2.md`
 (spec v2.4, wins on conflicts) for full product context.
