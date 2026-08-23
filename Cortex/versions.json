@@ -1,0 +1,16 @@
+{
+  "components": {
+    "open-claw": {
+      "path": "Cortex/Open-Claw",
+      "remote": "https://github.com/openclaw/openclaw.git",
+      "installedRef": null,
+      "lastUpdated": null
+    },
+    "cortex-agent": {
+      "path": "Cortex/Cortex_Agent",
+      "remote": null,
+      "installedRef": null,
+      "lastUpdated": null
+    }
+  }
+}

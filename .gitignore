@@ -1,0 +1,24 @@
+.DS_Store
+node_modules/
+*.log
+.psyntient/
+
+# Independently-versioned components — each is its own git clone with its
+# own remote/history. Cortex/versions.json tracks which ref is installed.
+Cortex/Open-Claw/
+Cortex/Cortex_Agent/
+Noetic_Interface/web/*
+!Noetic_Interface/web/.gitkeep
+
+# Runtime/private data — not part of the versioned skeleton
+Neural_Vault/local/*
+!Neural_Vault/local/.gitkeep
+Working_Memory/*
+!Working_Memory/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Debris from OpenClaw CLI ever being run outside Cortex/Open-Claw
+/.clawhub/
+/.openclaw/
+Cortex/openclaw-state/
