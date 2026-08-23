@@ -145,38 +145,73 @@ psyntient.io and never leaves the Node.
   Node pairing (Phase G). Key rotation and device pairing are unrelated
   and must stay decoupled.
 
-### First-run order: BYO key gate, then pairing gate
+### First-run order: BYO key gate, then pairing (Phase G — built, 2026-08-23)
 
 1. Gateway up (`ensureRunning()`).
 2. If no usable LLM key exists, show the blocking BYO key dialog first
    (see above) — save and apply it to OpenClaw.
-3. Immediately after that (or if a key already existed), check pairing: if
-   the Node isn't paired with psyntient.io, start the pairing flow (open
-   `https://psyntient.io/link-node?...`; user signs in and links a
-   Context; daemon stores the Node Access Token).
+3. Immediately after that (or if a key already existed), check pairing —
+   **not blocking**: `pairIfNeeded()` in `daemon/pairing.mjs` opens
+   `/link-node` in the browser and starts listening on the loopback
+   callback, but `daemon/launch.mjs` does not await it. Pairing isn't
+   required for MVP chat (dev plan section 3 doesn't list it), so the
+   Interface opens immediately regardless — pairing resolves in the
+   background whenever the user finishes (or abandons) the browser flow.
 4. Neither gate re-shows on later launches unless invalidated: the key
-   goes missing/invalid, or the node token gets revoked.
+   goes missing/invalid, or the node token gets revoked (401/403 from
+   heartbeat wipes `node.key` — see below).
 
 Settings can change the LLM key anytime (see above). Pairing is only for
 Node↔psyntient.io license/identity — never for chat login, and the two
 must stay decoupled (a bad LLM key must never trigger re-pairing, and
 vice versa).
 
-**Filename discrepancy found (2026-08-23), unresolved:** the product note
-describes a single `~/.psyntient/node.key` file, but this machine already
-has real, working pairing state under different names: `node_key`
-(Ed25519 identity key), `node_token` (the Node Access Token, `nt_`
-prefixed), and `config.json` (`node_id`/`context_id`/`server_url`).
-`daemon/pairing.mjs`'s `isPaired()` checks the files that actually exist,
-not `node.key`, so it doesn't wrongly report "unpaired" — but Phase G still
-needs to reconcile which scheme is authoritative before building the real
-`/link-node` flow. Don't rename/restructure these files without confirming
-with the user first; they're live credentials, not debris.
+**Full protocol:** `daemon/docs/AUTH_FLOW.md` (v1.0, "source of truth" —
+supersedes any earlier pairing description anywhere else, including
+older text that used to be in this file). Read that file first for
+anything pairing/auth related; this section is implementation notes on
+top of it, not a second spec.
 
-Phase G's actual pairing flow (the `/link-node` protocol, how the daemon
-receives the token back) is not yet implemented — `ensurePairedNotice()`
-is a non-blocking placeholder that only logs. Do not treat it as the real
-gate; building the real one needs the actual protocol spec.
+**Filename question, resolved by AUTH_FLOW.md section 7:** the canonical
+file is `~/.psyntient/node.key` (`node_token`/`node_id`/`context_id`/
+`base_url`/`paired_at`, mode 600) — confirmed correct by testing against
+the real production API (see below). The `node_key`/`node_token`/
+`config.json` files found on this machine earlier belong to AUTH_FLOW.md's
+explicitly **deprecated** install-code/device-code model ("remain live
+only for machines paired before the `/link-node` flow"). They were left
+untouched (not debris, just superseded) but `daemon/pairing.mjs` no
+longer reads them — this Node is unpaired under the current model until
+it goes through `/link-node` for real.
+
+**Verified against the real production API (2026-08-23), not just unit
+logic:** ran the actual loopback server, opened a real browser tab to
+`psyntient.io/link-node`, and simulated the callback locally with a fake
+token/id — confirmed `node.key` writes correctly (right schema, mode
+600), `isPaired()` flips correctly, the nonce-mismatch and `denied=1`
+paths both reject/cancel correctly. Then called `heartbeat()` with the
+fake token against the **real** `https://psyntient.io/api/public/nodes/heartbeat`
+endpoint — it correctly returned 401 "Invalid or revoked token", which
+correctly triggered wiping `node.key` per the spec's non-negotiable rule
+5. No real pairing was completed (all test data was synthetic/rejected);
+this Node remains unpaired.
+
+**Real, scoped gaps — not oversights, see `daemon/pairing.mjs`'s module
+header for the full reasoning:**
+- **No continuous ~5-minute heartbeat loop** (AUTH_FLOW.md 3.1's steady-
+  state requirement). `heartbeat()` is only called once at launch and
+  once right after a successful pairing. This daemon has no persistent
+  background process today — unlike the Gateway (real launchd service,
+  pre-existing) or the Interface (long-running child process,
+  `interface-control.mjs`), `daemon/launch.mjs` is a one-shot script per
+  launch. Building continuous heartbeating means building a real
+  persistent daemon process first — a genuine architecture decision, not
+  implemented speculatively here. Revocation is only caught at the
+  moments `heartbeat()` actually runs, not continuously.
+- **Plane C (Interface ↔ daemon local session, AUTH_FLOW.md section 4:
+  `/pair-interface`, `noetic_session` cookie) is not built.** Separate
+  concern from Node pairing above — the spec itself notes an
+  already-paired Node doesn't need this to keep chatting. Deferred as its
+  own follow-up, not part of this pass.
 
 ### Running WebClaw locally (dev mode)
 

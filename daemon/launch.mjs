@@ -13,19 +13,12 @@
 //    browser — no embedded webview, so behavior stays device-agnostic. If
 //    the Interface fails to start for any reason, fall back to the raw
 //    OpenClaw dashboard rather than leaving the user with nothing.
-import { spawn } from "node:child_process";
 import { ensureRunning as ensureGatewayRunning, paths as gatewayPaths } from "./openclaw-control.mjs";
 import { ensureRunning as ensureInterfaceRunning, url as interfaceUrl } from "./interface-control.mjs";
 import { hasAnyProvider, setProviderKey } from "./providers.mjs";
 import { promptForProviderKey, alert } from "./prompt-macos.mjs";
-import { ensurePairedNotice } from "./pairing.mjs";
-
-function openInBrowser(url) {
-  const platform = process.platform;
-  const cmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
-  const args = platform === "win32" ? ["", url] : [url];
-  spawn(cmd, args, { shell: platform === "win32", stdio: "ignore", detached: true }).unref();
-}
+import { pairIfNeeded } from "./pairing.mjs";
+import { openInBrowser } from "./open-browser.mjs";
 
 // Returns true once a usable key is configured, false if the user declined.
 async function ensureProviderKeyBlocking() {
@@ -63,7 +56,11 @@ async function main() {
   }
 
   // Order matters: BYO key gate first, pairing second — see CLAUDE.md.
-  await ensurePairedNotice();
+  // Not awaited: pairing is a background browser flow (open psyntient.io,
+  // wait for the user to sign in/approve/cancel) and isn't required for
+  // MVP chat, so it shouldn't hold up opening the Interface. See
+  // pairing.mjs for why this is safe to fire-and-forget.
+  pairIfNeeded();
 
   console.log("Starting the Noetic Interface...");
   let url;
