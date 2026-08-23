@@ -473,7 +473,20 @@ boundary. This means:
   Settings UI so the user can switch Vault provider from Local to cloud
   (Google Drive first).
 - **Phase H** = local Vault activation + the Settings UI to relocate/
-  switch provider (local path or Google Drive). Started 2026-08-23.
+  switch provider (local path or Google Drive). Started and completed
+  2026-08-23. Built: `daemon/vault.mjs` (readConfig/writeConfig against
+  `Neural_Vault/vault.config.json`, `activateLocal()` wired into
+  `launch.mjs`'s `main()`, `setLocalPath()` which *moves* existing
+  contents rather than stranding them, `switchToCloud()` which throws a
+  clear, honest "not wired up yet" error rather than pretending to
+  work — no Google OAuth client credentials exist in this repo yet); a
+  `/api/vault` Interface route (GET status, POST set-local/switch-cloud)
+  following the same subprocess-shell-out pattern as
+  `/api/provider-key`; and a VAULT section in the Settings dialog
+  (storage mode + path, relocate field/button, "Switch to Google Drive"
+  button that surfaces the honest 501). Google Drive itself remains
+  unimplemented on purpose — real scope, deferred until real OAuth
+  credentials exist, not a stub to "finish" opportunistically.
 - **Phase L (Installer)** = the full native installer (pkg/msi/etc.,
   install targets, GUI shortcut). Leave this until the end — until then,
   use the existing directory layout and the launcher/daemon work from
