@@ -19,6 +19,7 @@ import { hasAnyProvider, setProviderKey } from "./providers.mjs";
 import { promptForProviderKey, alert } from "./prompt-macos.mjs";
 import { pairIfNeeded } from "./pairing.mjs";
 import { ensureRunning as ensureHeartbeatRunning } from "./heartbeat-control.mjs";
+import { activateLocal as activateLocalVault } from "./vault.mjs";
 import { openInBrowser } from "./open-browser.mjs";
 
 // Returns true once a usable key is configured, false if the user declined.
@@ -53,6 +54,11 @@ async function main() {
   // (Node<->psyntient.io identity has nothing to do with LLM keys).
   ensureHeartbeatRunning();
 
+  // Also independent of everything else — just confirms the configured
+  // local vault directory exists. See CLAUDE.md section 8: entirely
+  // local-Node-scoped, no psyntient.io involvement.
+  activateLocalVault();
+
   console.log("Psyntient Node: checking Gateway...");
   const gatewayStatus = await ensureGatewayRunning();
 
@@ -63,10 +69,12 @@ async function main() {
   }
 
   // Order matters: BYO key gate first, pairing second — see CLAUDE.md.
-  // Not awaited: pairing is a background browser flow (open psyntient.io,
-  // wait for the user to sign in/approve/cancel) and isn't required for
-  // MVP chat, so it shouldn't hold up opening the Interface. See
-  // pairing.mjs for why this is safe to fire-and-forget.
+  // Not awaited here — KNOWN INTERIM GAP, not a design goal: pairing is
+  // now policy-required (it will gate subscription status), not optional,
+  // but that's only truly enforced by the target onboarding wizard
+  // (CLAUDE.md "First-run order" section), which retires this whole
+  // dialog-based flow rather than patching it. Don't "fix" this by making
+  // this call blocking in isolation.
   pairIfNeeded();
 
   console.log("Starting the Noetic Interface...");
