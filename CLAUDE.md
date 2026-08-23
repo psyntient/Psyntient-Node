@@ -331,6 +331,35 @@ serving path (a `ping` briefly returned "Timed out waiting for
 connect.challenge event" once, then was consistently healthy again within
 seconds). Same category, same non-issue for data integrity.
 
+### Service worker (`public/sw.js`) must never cache the HTML document cache-first
+
+Found via a real user-reported `ERR_FAILED` (2026-08-23), not proactively.
+The Phase F service worker originally used one blanket
+stale-while-revalidate strategy for every same-origin GET, including the
+navigation/HTML request itself. Production build asset filenames are
+content-hashed and change every build; a cached HTML document from before
+a rebuild references old-hashed JS/CSS files that no longer exist once
+`dist/client` gets replaced (not merged) by the next build. Made worse by
+`CACHE_NAME` being a static string that never changed across rebuilds, so
+the `activate` handler's own cleanup logic never actually fired.
+
+Fixed: navigation/HTML requests are **network-first** (always fetch the
+current shell when online, which then references current asset hashes;
+cache is only a fallback for genuine offline use). Everything else
+same-origin (JS/CSS/images) stays cache-first, which is actually safe —
+a content-hashed filename never changes meaning once fetched. If this
+service worker is ever touched again: never go back to caching the HTML
+document cache-first, and bump `CACHE_NAME` on any change so the existing
+cleanup logic actually clears old buckets.
+
+A server-side rebuild + restart does **not** immediately fix this for a
+user with an already-registered old service worker/stale cache — the
+browser needs to actually pick up the new `sw.js` (normally automatic on
+next navigation, since the new worker calls `skipWaiting()` +
+`clients.claim()`) or, for a stuck installed PWA specifically, may need a
+manual DevTools → Application → Service Workers "Unregister" + Cache
+Storage clear, or an uninstall/reinstall of the PWA.
+
 ### Safe WebClaw update procedure
 
 Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying
