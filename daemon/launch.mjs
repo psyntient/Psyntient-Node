@@ -1,8 +1,12 @@
-// Entry point for the GUI launcher (double-click / menu bar click): ensure
-// the Gateway is up and healthy, then open the Interface in the system
-// default browser — no embedded webview, so the app stays device-agnostic.
+// Entry point for the GUI launcher (double-click / menu bar click):
+// 1. Ensure the Gateway is up and healthy.
+// 2. If no LLM provider key is configured yet, collect one (MVP requirement).
+// 3. Open the Interface in the system default browser — no embedded
+//    webview, so behavior stays device-agnostic.
 import { spawn } from "node:child_process";
 import { ensureRunning, paths } from "./openclaw-control.mjs";
+import { hasAnyProvider, setProviderKey } from "./providers.mjs";
+import { promptForProviderKey } from "./prompt-macos.mjs";
 
 function openInBrowser(url) {
   const platform = process.platform;
@@ -13,9 +17,23 @@ function openInBrowser(url) {
 
 async function main() {
   console.log("Psyntient Node: checking Gateway...");
-  const { interfaceUrl } = await ensureRunning();
+  let { interfaceUrl } = await ensureRunning();
+
+  if (!(await hasAnyProvider())) {
+    console.log("No BYO provider key configured yet — prompting...");
+    const entry = await promptForProviderKey();
+    if (entry) {
+      await setProviderKey(entry.providerId, entry.apiKey);
+      console.log(`Saved ${entry.providerId} key. Restarting Gateway...`);
+      const result = await ensureRunning();
+      interfaceUrl = result.interfaceUrl || interfaceUrl;
+    } else {
+      console.log("No key entered — continuing without one. Interface may prompt again later.");
+    }
+  }
+
   const url = interfaceUrl || `http://127.0.0.1:${paths.GATEWAY_PORT}/`;
-  console.log(`Gateway healthy. Opening ${url}`);
+  console.log(`Opening ${url}`);
   openInBrowser(url);
 }
 
