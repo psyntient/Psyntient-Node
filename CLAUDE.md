@@ -101,6 +101,40 @@ Do not build a custom chat UI from scratch — rebrand WebClaw instead.
 - Default Gateway target: `http://127.0.0.1:18789/` (same Gateway this
   daemon already manages — see `daemon/openclaw-control.mjs`).
 
+### First-launch key gate and Settings key rotation
+
+The user supplies their own LLM provider API key; it is never uploaded to
+psyntient.io and never leaves the Node.
+
+- **First launch, no usable key:** show a blocking setup dialog. Chat must
+  not become available until a key is entered. This gate is already
+  implemented at the daemon layer — see `ensureProviderKeyBlocking()` in
+  `daemon/launch.mjs` and `daemon/prompt-macos.mjs` (an explicit interim
+  stand-in using native macOS dialogs; replace with an in-Interface modal
+  in Phase E, but keep the same blocking contract). Once a valid key
+  exists, never show this gate again — checked live against OpenClaw's own
+  auth store (`hasAnyProvider()` in `daemon/providers.mjs`), not a cached
+  flag.
+- **Settings must allow adding, replacing, or rotating keys** (switch
+  providers or paste a new key) at any time after first launch. Saving in
+  Settings must: update `providers.json` metadata, re-apply the key to
+  OpenClaw via the same `setProviderKey()` path the first-launch gate
+  uses, and restart/reload the Gateway so chat picks up the new
+  credential. **Do not build a second code path for this** — Settings and
+  the first-launch gate must call the same daemon function.
+- **Dependency this creates:** Settings runs in the browser and cannot
+  shell out to the daemon directly, so it needs an API surface — most
+  naturally a `Noetic_API` (Phase J) endpoint that calls
+  `daemon/providers.mjs`'s `setProviderKey()`. Phase J is late in the
+  locked phase order; Phase E may need to ship a minimal slice of that API
+  early (or some other IPC bridge) specifically for key management, rather
+  than waiting for the full Noetic API phase. Flag this to the user before
+  assuming either way when Phase E starts.
+- **Missing/invalid key after a Settings change** returns the user to a
+  clear "connect a model" / re-enter-key state — **not** a re-run of full
+  Node pairing (Phase G). Key rotation and device pairing are unrelated
+  and must stay decoupled.
+
 ### Safe WebClaw update procedure
 
 Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying

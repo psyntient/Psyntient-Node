@@ -31,6 +31,13 @@ function asAppleScriptStringList(items) {
   return "{" + items.map((s) => JSON.stringify(s)).join(", ") + "}";
 }
 
+export async function alert(message) {
+  console.log(message);
+  if (process.platform !== "darwin") return;
+  const script = `display alert "Psyntient Node" message ${JSON.stringify(message)}`;
+  await osascript(script);
+}
+
 export async function promptForProviderKey() {
   if (process.platform !== "darwin") {
     console.log(
@@ -40,7 +47,7 @@ export async function promptForProviderKey() {
   }
 
   const labels = SUPPORTED_PROVIDERS.map((p) => p.label);
-  const chooseScript = `choose from list ${asAppleScriptStringList(labels)} with prompt "Psyntient Node needs an LLM provider API key to get started. Choose a provider:" without multiple selections allowed`;
+  const chooseScript = `choose from list ${asAppleScriptStringList(labels)} with prompt "A provider API key is required before you can chat. Choose a provider:" without multiple selections allowed`;
   const chosen = await osascript(chooseScript);
   if (chosen.cancelled || chosen.stdout === "false") return null;
 

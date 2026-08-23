@@ -1,12 +1,20 @@
 // Entry point for the GUI launcher (double-click / menu bar click):
 // 1. Ensure the Gateway is up and healthy.
-// 2. If no LLM provider key is configured yet, collect one (MVP requirement).
+// 2. Blocking gate: if no usable provider key exists, chat must not become
+//    available this session. Require a key (retrying on a mechanically
+//    rejected/invalid entry) before opening anything; an explicit cancel
+//    exits without opening the browser at all, rather than opening a
+//    dashboard that can't chat. Once a valid key is configured, this gate
+//    never shows again — see hasAnyProvider() in providers.mjs, which
+//    checks OpenClaw's own auth store, not a local flag, so it can't get
+//    out of sync with reality. (Product decision — this is the same
+//    contract Settings must honor once Phase E adds key rotation there.)
 // 3. Open the Interface in the system default browser — no embedded
 //    webview, so behavior stays device-agnostic.
 import { spawn } from "node:child_process";
 import { ensureRunning, paths } from "./openclaw-control.mjs";
 import { hasAnyProvider, setProviderKey } from "./providers.mjs";
-import { promptForProviderKey } from "./prompt-macos.mjs";
+import { promptForProviderKey, alert } from "./prompt-macos.mjs";
 
 function openInBrowser(url) {
   const platform = process.platform;
@@ -15,24 +23,43 @@ function openInBrowser(url) {
   spawn(cmd, args, { shell: platform === "win32", stdio: "ignore", detached: true }).unref();
 }
 
-async function main() {
-  console.log("Psyntient Node: checking Gateway...");
-  let { interfaceUrl } = await ensureRunning();
+// Returns true once a usable key is configured, false if the user declined.
+async function ensureProviderKeyBlocking() {
+  if (await hasAnyProvider()) return true;
 
-  if (!(await hasAnyProvider())) {
-    console.log("No BYO provider key configured yet — prompting...");
+  for (;;) {
+    console.log("No provider key configured — this is required before chat is available.");
     const entry = await promptForProviderKey();
-    if (entry) {
+    if (!entry) {
+      await alert(
+        "A provider API key is required before Psyntient Node can chat. Relaunch when you're ready to add one."
+      );
+      return false;
+    }
+    try {
       await setProviderKey(entry.providerId, entry.apiKey);
-      console.log(`Saved ${entry.providerId} key. Restarting Gateway...`);
-      const result = await ensureRunning();
-      interfaceUrl = result.interfaceUrl || interfaceUrl;
-    } else {
-      console.log("No key entered — continuing without one. Interface may prompt again later.");
+      console.log(`Saved ${entry.providerId} key.`);
+      return true;
+    } catch (err) {
+      console.error(`Key rejected: ${err.message}`);
+      await alert(`That key couldn't be saved (${err.message}). Please try again.`);
+      // loop: re-prompt rather than silently continuing without a key
     }
   }
+}
 
-  const url = interfaceUrl || `http://127.0.0.1:${paths.GATEWAY_PORT}/`;
+async function main() {
+  console.log("Psyntient Node: checking Gateway...");
+  const { interfaceUrl: initialUrl } = await ensureRunning();
+
+  const ready = await ensureProviderKeyBlocking();
+  if (!ready) {
+    console.log("Exiting without opening the Interface — no provider key configured.");
+    return;
+  }
+
+  const { interfaceUrl } = await ensureRunning();
+  const url = interfaceUrl || initialUrl || `http://127.0.0.1:${paths.GATEWAY_PORT}/`;
   console.log(`Opening ${url}`);
   openInBrowser(url);
 }
