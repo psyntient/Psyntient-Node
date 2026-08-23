@@ -1,5 +1,7 @@
 {
   "webSource": "https://github.com/ibelick/webclaw.git",
-  "installedRef": null,
+  "installedRef": "341021c86566faa34ed604c5076cd7d0b0dba32f",
+  "localBranch": "psyntient",
+  "launchUrl": "http://localhost:3000/",
   "pwaShellOnly": true
 }

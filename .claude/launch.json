@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "noetic-interface",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd Noetic_Interface/web && set -a && source .env && set +a && pnpm dev"],
+      "port": 3000
+    }
+  ]
+}

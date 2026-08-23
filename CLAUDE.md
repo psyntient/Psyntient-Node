@@ -168,13 +168,41 @@ receives the token back) is not yet implemented — `ensurePairedNotice()`
 is a non-blocking placeholder that only logs. Do not treat it as the real
 gate; building the real one needs the actual protocol spec.
 
+### Running WebClaw locally (dev mode)
+
+- `Noetic_Interface/web/` is its own git clone (like `Cortex/Open-Claw` and
+  `Cortex/Cortex_Agent` — see rule 2's pattern). Our changes live on a
+  `psyntient` branch, not `main` — `main` tracks upstream so it stays
+  pullable without conflicting with our patches. Installed ref/branch
+  recorded in `Noetic_Interface/config.json`.
+- `.env` (gitignored, machine-local) needs `CLAWDBOT_GATEWAY_URL` and
+  `CLAWDBOT_GATEWAY_TOKEN` (the real value is in
+  `~/.psyntient/openclaw-state/openclaw.json`'s `gateway.auth.token`,
+  redacted from CLI output — read the config file directly). The app reads
+  these via bare `process.env`, not Vite's `import.meta.env`, so a plain
+  `.env` file is **not** auto-loaded by `vite dev` — the dev command must
+  explicitly `source .env` first (see `.claude/launch.json`'s
+  `noetic-interface` config for the working incantation).
+- **Required patch, not optional/cosmetic:** upstream webclaw `main`
+  hardcodes Gateway protocol version 3
+  (`apps/webclaw/src/server/gateway.ts`, `minProtocol`/`maxProtocol`), but
+  our bundled OpenClaw requires protocol 4 minimum. No upstream tag/release
+  fixes this as of 2026-08-23 (checked — no tags exist at all). Without
+  this bump the app cannot connect to the Gateway at all (every API route
+  fails). This is committed on the `psyntient` branch and must be
+  re-applied (or re-verified as no longer needed) on every WebClaw update,
+  same as the branding pass below — check the live `PROTOCOL_VERSION` in
+  `Cortex/Open-Claw/packages/gateway-protocol/src/version.ts` against
+  webclaw's hardcoded value whenever either side updates.
+
 ### Safe WebClaw update procedure
 
 Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying
-`Noetic_Interface/branding/` on top. Never wipe `Working_Memory/`,
-`Neural_Vault/`, or `~/.psyntient/` as part of a WebClaw update — those are
-unrelated to the Interface's own code and must survive it exactly like
-OpenClaw state must survive an OpenClaw update (rule 3 above).
+`Noetic_Interface/branding/` **and** the protocol-version patch above on
+top. Never wipe `Working_Memory/`, `Neural_Vault/`, or `~/.psyntient/` as
+part of a WebClaw update — those are unrelated to the Interface's own code
+and must survive it exactly like OpenClaw state must survive an OpenClaw
+update (rule 3 above).
 
 ---
 
