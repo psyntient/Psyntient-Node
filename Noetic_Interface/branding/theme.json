@@ -1,0 +1,46 @@
+{
+  "name": "Psyntient Noetic Interface theme",
+  "notes": "Rebrand target for the WebClaw fork in Noetic_Interface/web/. Never ship WebClaw's default purple/indigo-on-white look.",
+  "colors": {
+    "background": {
+      "ink": "#0a0a0f",
+      "inkAlt": "#0F172A"
+    },
+    "text": {
+      "cream": "#f8f7f2"
+    },
+    "accent": {
+      "gold": "#f5d9a8",
+      "goldBright": "#f5c76a",
+      "goldRose": "#f5b89e"
+    }
+  },
+  "typography": {
+    "ui": ["Inter", "Outfit", "SF Pro"],
+    "mono": ["JetBrains Mono"],
+    "monoUsage": "paths and data"
+  },
+  "avatar": {
+    "concept": "calm wise magical elf",
+    "avoid": "cartoonish"
+  },
+  "motion": {
+    "style": "subtle",
+    "signatureMoment": "gold glints at insights/value moments"
+  },
+  "uxToKeepFromWebClaw": [
+    "voice-to-text",
+    "streaming text appearance/highlight",
+    "settings page",
+    "chat threads"
+  ],
+  "uxMapping": {
+    "webclawThreads": "Projects + open chat"
+  },
+  "chromeGuidance": "trim excess chrome beyond what's listed above",
+  "wiring": {
+    "mode": "gateway-client-only",
+    "auth": "gateway URL + token only, no product email/password login",
+    "defaultGatewayUrl": "http://127.0.0.1:18789/"
+  }
+}

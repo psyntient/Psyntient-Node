@@ -83,6 +83,32 @@ Noetic Interface / daemon
 Updating OpenClaw = replace code. Preserve state + workspace + env wiring +
 service entrypoint.
 
+## 7. Noetic Interface must be WebClaw, not a greenfield UI
+
+Clone `https://github.com/ibelick/webclaw` into `Noetic_Interface/web/`.
+Do not build a custom chat UI from scratch — rebrand WebClaw instead.
+
+- **Rebrand**, don't replace: theme tokens live in `Noetic_Interface/branding/`
+  (see `theme.json` — dark ink backgrounds, cream text, gold accents; see
+  full palette/type/avatar/motion spec there). Never ship WebClaw's default
+  purple/indigo-on-white look.
+- **Keep** WebClaw's strong UX pieces: voice-to-text, streaming text
+  appearance/highlight, settings page, chat threads. Trim excess chrome.
+  Map WebClaw "threads" to "Projects" + open chat.
+- **No separate agent stack.** The Interface is a pure client of the
+  already-running bundled Gateway — wire it with Gateway URL + token only.
+  No product email/password login, ever.
+- Default Gateway target: `http://127.0.0.1:18789/` (same Gateway this
+  daemon already manages — see `daemon/openclaw-control.mjs`).
+
+### Safe WebClaw update procedure
+
+Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying
+`Noetic_Interface/branding/` on top. Never wipe `Working_Memory/`,
+`Neural_Vault/`, or `~/.psyntient/` as part of a WebClaw update — those are
+unrelated to the Interface's own code and must survive it exactly like
+OpenClaw state must survive an OpenClaw update (rule 3 above).
+
 ---
 
 See `Psyntient_Node_Development_Plan.md` and `Psyntient_Node_Project_v2.md`
