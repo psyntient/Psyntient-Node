@@ -1,0 +1,33 @@
+#!/bin/bash
+# GUI-clickable entry point (Finder double-click). Runs with a minimal
+# environment (no shell rc files sourced), so resolve node explicitly
+# rather than relying on PATH.
+NODE_ROOT="/Users/woodleybrown/Psyntient_Node"
+LOG_FILE="$NODE_ROOT/logs/launcher.log"
+
+NODE_BIN=""
+for candidate in /usr/local/opt/node/bin/node /opt/homebrew/opt/node/bin/node /usr/local/bin/node /opt/homebrew/bin/node; do
+  if [ -x "$candidate" ]; then
+    NODE_BIN="$candidate"
+    break
+  fi
+done
+if [ -z "$NODE_BIN" ]; then
+  NODE_BIN="$(command -v node || true)"
+fi
+
+if [ -z "$NODE_BIN" ]; then
+  osascript -e 'display alert "Psyntient Node" message "Could not find a Node.js install to launch the Gateway. See logs/launcher.log." as critical' >/dev/null 2>&1
+  exit 1
+fi
+
+{
+  echo "=== $(date) ==="
+  "$NODE_BIN" "$NODE_ROOT/daemon/launch.mjs"
+} >> "$LOG_FILE" 2>&1
+status=$?
+
+if [ $status -ne 0 ]; then
+  osascript -e 'display alert "Psyntient Node" message "Gateway launch failed. See logs/launcher.log." as critical' >/dev/null 2>&1
+fi
+exit $status
