@@ -54,20 +54,29 @@ export async function hasAnyProvider() {
   return Array.isArray(result?.profiles) && result.profiles.length > 0;
 }
 
+// Add, replace, or rotate — one path for all three (Settings must reuse
+// this exact function, not a second implementation; see CLAUDE.md). If a
+// profile already exists for this provider, its key is overwritten in
+// place rather than leaving the old one behind alongside a new profile.
 export async function setProviderKey(providerId, apiKey) {
   if (!apiKey || !apiKey.trim()) {
     throw new Error("API key must not be empty");
   }
-  const result = await runCli(["models", "auth", "paste-api-key", "--provider", providerId], {
-    input: apiKey.trim(),
-  });
+
+  const existing = await jsonCommand(["models", "auth", "list", "--provider", providerId]);
+  const profileId = existing?.profiles?.[0]?.id || `${providerId}:manual`;
+
+  const result = await runCli(
+    ["models", "auth", "paste-api-key", "--provider", providerId, "--profile-id", profileId],
+    { input: apiKey.trim() }
+  );
   if (result.code !== 0) {
     throw new Error(`Failed to save ${providerId} key: ${result.stderr || result.stdout}`);
   }
 
   const data = readProviders();
   data.providers[providerId] = {
-    profileId: `${providerId}:manual`,
+    profileId,
     configuredAt: new Date().toISOString(),
   };
   writeProviders(data);
