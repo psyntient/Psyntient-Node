@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { ensureRunning, paths } from "./openclaw-control.mjs";
 import { hasAnyProvider, setProviderKey } from "./providers.mjs";
 import { promptForProviderKey, alert } from "./prompt-macos.mjs";
+import { ensurePairedNotice } from "./pairing.mjs";
 
 function openInBrowser(url) {
   const platform = process.platform;
@@ -57,6 +58,9 @@ async function main() {
     console.log("Exiting without opening the Interface — no provider key configured.");
     return;
   }
+
+  // Order matters: BYO key gate first, pairing second — see CLAUDE.md.
+  await ensurePairedNotice();
 
   const { interfaceUrl } = await ensureRunning();
   const url = interfaceUrl || initialUrl || `http://127.0.0.1:${paths.GATEWAY_PORT}/`;

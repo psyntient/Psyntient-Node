@@ -135,6 +135,39 @@ psyntient.io and never leaves the Node.
   Node pairing (Phase G). Key rotation and device pairing are unrelated
   and must stay decoupled.
 
+### First-run order: BYO key gate, then pairing gate
+
+1. Gateway up (`ensureRunning()`).
+2. If no usable LLM key exists, show the blocking BYO key dialog first
+   (see above) — save and apply it to OpenClaw.
+3. Immediately after that (or if a key already existed), check pairing: if
+   the Node isn't paired with psyntient.io, start the pairing flow (open
+   `https://psyntient.io/link-node?...`; user signs in and links a
+   Context; daemon stores the Node Access Token).
+4. Neither gate re-shows on later launches unless invalidated: the key
+   goes missing/invalid, or the node token gets revoked.
+
+Settings can change the LLM key anytime (see above). Pairing is only for
+Node↔psyntient.io license/identity — never for chat login, and the two
+must stay decoupled (a bad LLM key must never trigger re-pairing, and
+vice versa).
+
+**Filename discrepancy found (2026-08-23), unresolved:** the product note
+describes a single `~/.psyntient/node.key` file, but this machine already
+has real, working pairing state under different names: `node_key`
+(Ed25519 identity key), `node_token` (the Node Access Token, `nt_`
+prefixed), and `config.json` (`node_id`/`context_id`/`server_url`).
+`daemon/pairing.mjs`'s `isPaired()` checks the files that actually exist,
+not `node.key`, so it doesn't wrongly report "unpaired" — but Phase G still
+needs to reconcile which scheme is authoritative before building the real
+`/link-node` flow. Don't rename/restructure these files without confirming
+with the user first; they're live credentials, not debris.
+
+Phase G's actual pairing flow (the `/link-node` protocol, how the daemon
+receives the token back) is not yet implemented — `ensurePairedNotice()`
+is a non-blocking placeholder that only logs. Do not treat it as the real
+gate; building the real one needs the actual protocol spec.
+
 ### Safe WebClaw update procedure
 
 Updating WebClaw means replacing `Noetic_Interface/web/` and re-applying
