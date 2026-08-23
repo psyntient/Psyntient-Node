@@ -228,6 +228,14 @@ message with no redirect). Read AUTH_FLOW.md first for anything pairing/
 auth related; this section is implementation notes on top of both docs,
 not a third spec.
 
+**One deliberate deviation from both docs, decided 2026-08-23:** the
+heartbeat response's `vault` field is **not** treated as authoritative
+here, contrary to what AUTH_FLOW.md 3.1/MIGRATION_GUIDE.md section 5 say.
+See section 8 below — vaults are never registered with psyntient.io by
+design, so there is nothing meaningful for that field to point to in this
+implementation. `heartbeat()` passes the response through generically and
+does not act on `data.vault`; keep it that way.
+
 **Filename question, resolved by AUTH_FLOW.md section 7:** the canonical
 file is `~/.psyntient/node.key` (`node_token`/`node_id`/`context_id`/
 `base_url`/`paired_at`, mode 600) — confirmed correct by testing against
@@ -430,6 +438,32 @@ update (rule 3 above).
 Follow the locked phase order; don't build the full native installer
 early, don't require cloud storage at install or first launch.
 
+**Vaults are never registered with psyntient.io — by design, permanently,
+not a temporary scoping decision.** Vaults contain private user data;
+psyntient.io never knows where a vault lives (local path, or which cloud
+account/folder) or what it contains. The **only** thing the website knows
+is that a Node is paired under a given Account Context (`AUTH_FLOW.md`
+Plane B) — nothing about vault location or contents ever crosses that
+boundary. This means:
+
+- **`AUTH_FLOW.md`'s heartbeat `vault` field is not authoritative for
+  vault path/provider and must never be acted on that way** —
+  `MIGRATION_GUIDE.md`'s checklist item "treat `vault` from heartbeat as
+  authoritative; handle reassignment" does **not** apply to this
+  implementation. If a future heartbeat response happens to include a
+  `vault` block, treat it as informational/unrelated to storage location
+  (likely entitlement/tier metadata, not a storage pointer) — do not wire
+  any vault-switching logic to it. `daemon/pairing.mjs`'s `heartbeat()`
+  already just passes `data` through generically without acting on
+  `vault` — keep it that way.
+- All vault configuration (`Neural_Vault/vault.config.json`'s
+  `storageMode`, local path, cloud provider/account) is decided and
+  stored **entirely on the Node**, with zero network calls to
+  psyntient.io for vault specifics. Cloud storage OAuth (Google Drive
+  first) happens directly between the Node/daemon and the cloud
+  provider — psyntient.io is not a party to it and never holds those
+  tokens, same sovereignty principle as everything else in this file.
+
 - **Default Vault is local**: `Neural_Vault/` under the Node root
   (`/Users/woodleybrown/Psyntient_Node/Neural_Vault`, already scaffolded
   in Phase A with `vault.config.json`'s `storageMode: "local"`). The Node
@@ -437,11 +471,9 @@ early, don't require cloud storage at install or first launch.
   requirement.
 - **Cloud Vault is optional and later** (Phase H): add an Interface
   Settings UI so the user can switch Vault provider from Local to cloud
-  (Google Drive first). OAuth is run by the Node/daemon — psyntient.io
-  never holds those tokens, same sovereignty principle as everything else
-  in this file.
+  (Google Drive first).
 - **Phase H** = local Vault activation + the Settings UI to relocate/
-  switch provider (local path or Google Drive). Not started.
+  switch provider (local path or Google Drive). Started 2026-08-23.
 - **Phase L (Installer)** = the full native installer (pkg/msi/etc.,
   install targets, GUI shortcut). Leave this until the end — until then,
   use the existing directory layout and the launcher/daemon work from
