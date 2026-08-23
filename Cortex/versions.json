@@ -3,14 +3,14 @@
     "open-claw": {
       "path": "Cortex/Open-Claw",
       "remote": "https://github.com/openclaw/openclaw.git",
-      "installedRef": null,
-      "lastUpdated": null
+      "installedRef": "eb4eaea39b757228b575a671255fe9b4e2c2c891",
+      "lastUpdated": "2026-08-23"
     },
     "cortex-agent": {
       "path": "Cortex/Cortex_Agent",
       "remote": null,
-      "installedRef": null,
-      "lastUpdated": null
+      "installedRef": "f6687bf23166928c516b763da46e163f07475294",
+      "lastUpdated": "2026-08-23"
     }
   }
 }
