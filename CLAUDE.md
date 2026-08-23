@@ -241,9 +241,10 @@ dev-only tooling. It runs a real production build
 (`pnpm build` in `Noetic_Interface/web/`, output at
 `apps/webclaw/dist/server/server.js`) served via `vite preview` as a
 detached background child process, tracked by PID file
-(`~/.psyntient/interface.pid`), fixed port `3210` (distinct from the `3000`
-used for ad-hoc dev testing so both can run at once without conflict).
-Logs at `logs/interface.log`.
+(`~/.psyntient/interface.pid`), fixed port `3210` (distinct from the port
+used for ad-hoc dev testing — see `.claude/launch.json`'s
+`noetic-interface` config, currently `3111` — so both can run at once
+without conflict). Logs at `logs/interface.log`.
 
 **This is deliberately NOT a launchd/systemd service yet** — no
 install/start/stop/status parity with `daemon/openclaw-control.mjs`'s
@@ -251,14 +252,19 @@ Gateway management. That's real follow-up scope, not done. The
 `ensureRunning()`/`stop()`/`url()` API in `interface-control.mjs` is
 written so upgrading to a real service later doesn't change callers.
 
-**Gotcha found by testing, not documented anywhere obvious:** `vite
-preview` binds IPv6 `::1` only by default — `curl`/`fetch` against
-`127.0.0.1` gets a bare connection refused even though the server is
-genuinely up and `localhost` works fine. Must pass `--host 127.0.0.1`
-explicitly. If a future change to how the Interface is served drops this
-flag, health checks will silently fail to connect even though the process
-is running - don't assume "not listening on 127.0.0.1" means "not
-running."
+**Gotcha found by testing, not documented anywhere obvious:** both `vite
+preview` (production) and `vite dev` (dev testing) bind IPv6 `::1` only
+by default — `curl`/`fetch` against `127.0.0.1` gets a bare connection
+refused even though the server is genuinely up and `localhost` works
+fine. Must pass `--host 127.0.0.1` explicitly to both. If a future change
+to how the Interface is served drops this flag, health checks will
+silently fail to connect even though the process is running — don't
+assume "not listening on 127.0.0.1" means "not running." For `vite dev`
+specifically, passing the flag through `pnpm dev -- --host 127.0.0.1`
+does NOT work — pnpm's multi-hop script forwarding (root → app package →
+vite) mangles the `--` separator; `.claude/launch.json`'s dev config
+bypasses this by calling `npx vite dev` directly inside
+`apps/webclaw/` instead of going through the `pnpm dev` script chain.
 
 **Gateway token wiring:** `getGatewayEnv()` in `interface-control.mjs`
 reads `gateway.auth.token` directly from `openclaw.json` — the CLI's own
