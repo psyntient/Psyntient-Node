@@ -145,26 +145,74 @@ psyntient.io and never leaves the Node.
   Node pairing (Phase G). Key rotation and device pairing are unrelated
   and must stay decoupled.
 
-### First-run order: BYO key gate, then pairing (Phase G — built, 2026-08-23)
+### First-run order — CURRENT interim implementation vs. TARGET design
+
+**Policy reversal (2026-08-23): pairing is required, not optional.**
+Earlier text in this file (and Phase G's original implementation) treated
+pairing as non-blocking because the dev plan's MVP section doesn't list
+it. The user has explicitly corrected this: **pairing will eventually
+correspond to subscription status**, so it cannot be skippable — a Node
+that's never paired can never be gated on entitlement. Do not re-introduce
+"pairing is optional" reasoning anywhere; if you find it, it's stale.
+
+**TARGET onboarding flow (designed 2026-08-23, not yet built — build as
+one cohesive pass after Phases H–L are done, not piecemeal):**
+
+1. Welcome page inside the Interface — Psyntient mark + wordmark, an
+   "Initialize Node →" button. No native dialog.
+2. API key page (**replaces the native macOS dialog entirely** —
+   `daemon/prompt-macos.mjs` gets retired, not run alongside this):
+   provider dropdown + key input, same shape as the Settings "Provider
+   key" section (`settings-dialog.tsx` / `routes/api/provider-key.ts`),
+   reused not reinvented. Runs a live connection test before proceeding —
+   this closes a gap flagged since Phase C/E: `paste-api-key` never
+   validated a key against the real provider API before, so a
+   billing-exhausted or wrong key was previously only discovered when the
+   user tried to chat.
+3. Once the key test passes, pairing triggers automatically — **not
+   skippable**. The wizard does not advance to step 4 until pairing
+   completes.
+4. Vault explanation page: local `Neural_Vault/` is the default, shown
+   with its actual path; option to switch to cloud. Note inline that this
+   is changeable later from Settings, to reduce first-run decision
+   pressure.
+5. User picks local (continue) or cloud (runs the provider's auth/setup
+   flow, e.g. Google Drive OAuth via the Node/daemon — see CLAUDE.md
+   section 8).
+6. Noetic Interface loads for real.
+
+A progress bar/stepper spans all pages, showing onboarding completion.
+
+This depends on Phase H (Vault) existing — steps 4–5 have nothing to show
+before then — hence the "after H–L" sequencing, not because the earlier
+steps (1–3) are individually hard to build sooner.
+
+**CURRENT interim implementation (still live, will be fully replaced by
+the above, not incrementally patched toward it):**
 
 1. Gateway up (`ensureRunning()`).
-2. If no usable LLM key exists, show the blocking BYO key dialog first
-   (see above) — save and apply it to OpenClaw.
+2. If no usable LLM key exists, show the blocking BYO key dialog
+   (`daemon/prompt-macos.mjs`, native macOS — this is exactly what gets
+   retired by the target design's step 2) — save and apply it to
+   OpenClaw.
 3. Immediately after that (or if a key already existed), check pairing —
-   **not blocking**: `pairIfNeeded()` in `daemon/pairing.mjs` opens
-   `/link-node` in the browser and starts listening on the loopback
-   callback, but `daemon/launch.mjs` does not await it. Pairing isn't
-   required for MVP chat (dev plan section 3 doesn't list it), so the
-   Interface opens immediately regardless — pairing resolves in the
-   background whenever the user finishes (or abandons) the browser flow.
+   currently **still non-blocking** (`pairIfNeeded()` in
+   `daemon/pairing.mjs`, not awaited by `daemon/launch.mjs`). This
+   contradicts the policy reversal above and is a known, acknowledged gap
+   in the interim state, not a design goal — it stays this way only
+   because the real fix is the onboarding wizard, not a patch to the
+   dialog-based flow that's being retired anyway. Don't "fix" this
+   in isolation by making the *current* dialog-based gate block on
+   pairing too; that work is superseded by the wizard.
 4. Neither gate re-shows on later launches unless invalidated: the key
-   goes missing/invalid, or the node token gets revoked (401/403 from
+   goes missing/invalid, or the node token gets revoked (401/403/404 from
    heartbeat wipes `node.key` — see below).
 
 Settings can change the LLM key anytime (see above). Pairing is only for
 Node↔psyntient.io license/identity — never for chat login, and the two
 must stay decoupled (a bad LLM key must never trigger re-pairing, and
-vice versa).
+vice versa) — that separation stands regardless of the blocking-vs-not
+question above.
 
 **Full protocol:** `daemon/docs/AUTH_FLOW.md` (v1.0, "source of truth" —
 supersedes any earlier pairing description anywhere else, including
@@ -402,8 +450,12 @@ early, don't require cloud storage at install or first launch.
   a real launchd/systemd service yet, and doesn't need to become one
   before Phase L).
 - **MVP does not include** the full installer or cloud Vault — only
-  Gateway up, BYO API key on first launch, pairing when needed, and chat
-  via WebClaw against the bundled OpenClaw.
+  Gateway up, BYO API key on first launch, pairing, and chat via WebClaw
+  against the bundled OpenClaw. ("Pairing when needed" was the original
+  MVP list's phrasing; per the policy reversal in section 7 above,
+  pairing is now required, not conditional — the target onboarding flow
+  makes it a non-skippable step, since it will eventually gate
+  subscription status.)
 
 Full installer-flow and Vault-provider product details:
 `Psyntient_Node_Project_v2.md`. Phase timing (H then L): the Development
