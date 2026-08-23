@@ -20,6 +20,7 @@ import { promptForProviderKey, alert } from "./prompt-macos.mjs";
 import { pairIfNeeded } from "./pairing.mjs";
 import { ensureRunning as ensureHeartbeatRunning } from "./heartbeat-control.mjs";
 import { activateLocal as activateLocalVault } from "./vault.mjs";
+import { ensureScaffold as ensureWorkingMemoryScaffold } from "./working-memory.mjs";
 import { openInBrowser } from "./open-browser.mjs";
 
 // Returns true once a usable key is configured, false if the user declined.
@@ -58,6 +59,10 @@ async function main() {
   // local vault directory exists. See CLAUDE.md section 8: entirely
   // local-Node-scoped, no psyntient.io involvement.
   activateLocalVault();
+
+  // Independent too — just confirms Working_Memory/chat_context and
+  // Working_Memory/cortex_projects exist (Phase I).
+  ensureWorkingMemoryScaffold();
 
   console.log("Psyntient Node: checking Gateway...");
   const gatewayStatus = await ensureGatewayRunning();

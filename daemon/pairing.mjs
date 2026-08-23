@@ -28,6 +28,7 @@ import path from "node:path";
 import os from "node:os";
 import { openInBrowser } from "./open-browser.mjs";
 import { url as interfaceUrl } from "./interface-control.mjs";
+import { deviceName } from "./device-name.mjs";
 
 const PSYNTIENT_DIR = path.join(os.homedir(), ".psyntient");
 const NODE_KEY_PATH = path.join(PSYNTIENT_DIR, "node.key");
@@ -78,7 +79,7 @@ function htmlPage(message, redirectTo) {
 // process alive on its own until this resolves, no extra plumbing needed.
 export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
   const sessionNonce = crypto.randomBytes(24).toString("base64url");
-  const deviceName = os.hostname();
+  const device = deviceName();
   const osInfo = `${process.platform} ${os.release()} ${process.arch}`.slice(0, 120);
 
   return new Promise((resolve, reject) => {
@@ -142,7 +143,7 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
       const pairUrl = new URL("/link-node", BASE_URL);
       pairUrl.searchParams.set("callback", `http://127.0.0.1:${CALLBACK_PORT}/pair/return`);
       pairUrl.searchParams.set("session_nonce", sessionNonce);
-      pairUrl.searchParams.set("device_name", deviceName);
+      pairUrl.searchParams.set("device_name", device);
       pairUrl.searchParams.set("os_info", osInfo);
       if (process.env.PAIRING_DEBUG_LOG_URL) console.log("PAIR_URL:", pairUrl.toString());
       openInBrowser(pairUrl.toString());
