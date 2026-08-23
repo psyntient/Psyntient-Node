@@ -121,21 +121,25 @@ psyntient.io and never leaves the Node.
   exists, never show this gate again — checked live against OpenClaw's own
   auth store (`hasAnyProvider()` in `daemon/providers.mjs`), not a cached
   flag.
-- **Settings must allow adding, replacing, or rotating keys** (switch
-  providers or paste a new key) at any time after first launch. Saving in
-  Settings must: update `providers.json` metadata, re-apply the key to
-  OpenClaw via the same `setProviderKey()` path the first-launch gate
-  uses, and restart/reload the Gateway so chat picks up the new
-  credential. **Do not build a second code path for this** — Settings and
-  the first-launch gate must call the same daemon function.
-- **Dependency this creates:** Settings runs in the browser and cannot
-  shell out to the daemon directly, so it needs an API surface — most
-  naturally a `Noetic_API` (Phase J) endpoint that calls
-  `daemon/providers.mjs`'s `setProviderKey()`. Phase J is late in the
-  locked phase order; Phase E may need to ship a minimal slice of that API
-  early (or some other IPC bridge) specifically for key management, rather
-  than waiting for the full Noetic API phase. Flag this to the user before
-  assuming either way when Phase E starts.
+- **Settings allows adding, replacing, or rotating keys** — **built**
+  (2026-08-23, `Noetic_Interface/web` commit `b034277`): a "Provider key"
+  section in `settings-dialog.tsx` (provider dropdown + key input + gold
+  Save button) posts to `apps/webclaw/src/routes/api/provider-key.ts`,
+  which spawns `daemon/providers.mjs`'s `add` CLI path — **the same
+  `setProviderKey()` the first-launch gate uses**, no second
+  implementation. Verified live: rotated a real (throwaway) key through
+  the actual UI, config updated, Gateway restarted, UI showed a real
+  success state.
+- **Resolved differently than expected:** the dependency once flagged
+  here — "Settings can't shell out to the daemon, needs `Noetic_API`
+  (Phase J)" — turned out unnecessary. WebClaw's own dashboard server
+  already *is* a Node backend with filesystem access; it can spawn
+  `daemon/providers.mjs` directly as a subprocess. No `Noetic_API` slice
+  needed for this. `provider-key.ts` duplicates the small
+  `SUPPORTED_PROVIDERS` list by hand (rather than importing
+  `daemon/providers.mjs` directly) to avoid Vite's SSR bundler trying to
+  analyze code outside the app's own `src/` — keep that list in sync if
+  `daemon/providers.mjs`'s list changes.
 - **Missing/invalid key after a Settings change** returns the user to a
   clear "connect a model" / re-enter-key state — **not** a re-run of full
   Node pairing (Phase G). Key rotation and device pairing are unrelated
@@ -201,21 +205,34 @@ gate; building the real one needs the actual protocol spec.
   `Cortex/Open-Claw/packages/gateway-protocol/src/version.ts` against
   webclaw's hardcoded value whenever either side updates.
 
-### Known issue: live stream display can stick on "Generating..."
+### Known issue: live stream display could stick on "Generating..." — mitigated, root cause still deferred
 
 Upstream bug (not our protocol patch, not the Gateway/agent/daemon) in
 `apps/webclaw/src/screens/chat/hooks/use-chat-stream.ts`. Its `EventSource`
 reconnects on every session load (opens a generic-friendlyId stream, then
 immediately replaces it with a session-key-specific one), and if an agent
 run's `final` event arrives during that reconnect window, the UI never
-gets the event that would trigger `refreshHistory()` — it sticks on
-"Generating..." even though the run completed. **Data is never lost or
-wrong** — `GET /api/history` always has the real, complete conversation;
-a page reload always shows it correctly. Confirmed via direct API checks
-against a stuck session (2026-08-23). Deferred, not fixed — the merge/dedup
-logic in that file is substantial (~700 lines) and worth a dedicated pass
-rather than a rushed patch. Revisit once the rebrand pass is further along
-if it's still a real annoyance.
+gets the event that would trigger `refreshHistory()`. **Data is never lost
+or wrong** — `GET /api/history` always has the real, complete conversation.
+
+**Mitigated (2026-08-23):** `chat-screen.tsx`'s `startRun()` already had a
+safety-net timeout that force-refetches history if the live event never
+arrives — it was just set to 120s, so the app looked permanently broken
+long before it self-healed. Reduced to 15s. Resets on every `delta` event,
+so a genuinely slow tool call or thinking pause doesn't trigger it early.
+This does not fix the underlying reconnect race (still deferred — the
+merge/dedup logic in `use-chat-stream.ts` is substantial, ~700 lines,
+worth a dedicated pass) but bounds the worst case from "requires a manual
+reload" to "self-heals within ~15s."
+
+**Separately, a real (non-flaky) bug was found and fixed in the same
+area:** `textFromMessage()` in `screens/chat/utils.ts` only ever read
+`msg.content` as an array-of-parts, but the Gateway sends **user**
+message content as a plain string — every user message rendered as an
+empty bubble, unconditionally, not intermittently. Fixed to handle both
+shapes; `GatewayMessage.content`'s type widened to match. This was the
+actual cause of "chat doesn't show the text I submitted," separate from
+the stream-timing issue above.
 
 ### Production serving: daemon/interface-control.mjs
 
@@ -263,6 +280,38 @@ top. Never wipe `Working_Memory/`, `Neural_Vault/`, or `~/.psyntient/` as
 part of a WebClaw update — those are unrelated to the Interface's own code
 and must survive it exactly like OpenClaw state must survive an OpenClaw
 update (rule 3 above).
+
+## 8. Vault storage and installer — phase rules
+
+Follow the locked phase order; don't build the full native installer
+early, don't require cloud storage at install or first launch.
+
+- **Default Vault is local**: `Neural_Vault/` under the Node root
+  (`/Users/woodleybrown/Psyntient_Node/Neural_Vault`, already scaffolded
+  in Phase A with `vault.config.json`'s `storageMode: "local"`). The Node
+  must work fully with local-only Vault — cloud is never a hard
+  requirement.
+- **Cloud Vault is optional and later** (Phase H): add an Interface
+  Settings UI so the user can switch Vault provider from Local to cloud
+  (Google Drive first). OAuth is run by the Node/daemon — psyntient.io
+  never holds those tokens, same sovereignty principle as everything else
+  in this file.
+- **Phase H** = local Vault activation + the Settings UI to relocate/
+  switch provider (local path or Google Drive). Not started.
+- **Phase L (Installer)** = the full native installer (pkg/msi/etc.,
+  install targets, GUI shortcut). Leave this until the end — until then,
+  use the existing directory layout and the launcher/daemon work from
+  earlier phases (see `daemon/interface-control.mjs`'s PID-file approach,
+  section 7's "Production serving" note above — that's intentionally not
+  a real launchd/systemd service yet, and doesn't need to become one
+  before Phase L).
+- **MVP does not include** the full installer or cloud Vault — only
+  Gateway up, BYO API key on first launch, pairing when needed, and chat
+  via WebClaw against the bundled OpenClaw.
+
+Full installer-flow and Vault-provider product details:
+`Psyntient_Node_Project_v2.md`. Phase timing (H then L): the Development
+Plan.
 
 ---
 
