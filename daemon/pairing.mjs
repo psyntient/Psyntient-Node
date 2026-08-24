@@ -27,7 +27,6 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { openInBrowser } from "./open-browser.mjs";
-import { url as interfaceUrl } from "./interface-control.mjs";
 import { deviceName } from "./device-name.mjs";
 
 const PSYNTIENT_DIR = path.join(os.homedir(), ".psyntient");
@@ -62,21 +61,31 @@ function unpair(reason) {
   console.log(`Node unpaired: ${reason}`);
 }
 
-// redirectTo: per AUTH_FLOW.md 2.4 point 3 and MIGRATION_GUIDE.md section
-// 2.6, the success page redirects to the local Interface after showing
-// the confirmation — cancel/error pages don't redirect anywhere.
-function htmlPage(message, redirectTo) {
-  const redirectScript = redirectTo
-    ? `<script>setTimeout(function(){location.href=${JSON.stringify(redirectTo)}},1200)</script>`
+// AUTH_FLOW.md 2.4 point 3 / MIGRATION_GUIDE.md section 2.6 originally
+// called for the success page to redirect to the local Interface — the
+// right call when pairing could be triggered without anything else
+// waiting on it (the old non-blocking pairIfNeeded() flow that used to
+// call this). Now that pairing only ever happens from inside the
+// onboarding wizard's own tab (which is already awaiting this exact
+// pairStart() call and advances itself the moment it resolves), that
+// redirect just opens a confusing second copy of the Interface in this
+// browser-opened tab. Closes itself instead when possible (works when
+// the browser actually let a script-initiated tab close itself, which
+// isn't guaranteed) and always shows a static "you can close this"
+// message as the fallback -- no redirect either way.
+function htmlPage(message, { closeSelf = false } = {}) {
+  const closeScript = closeSelf
+    ? `<script>setTimeout(function(){window.close()},900)</script>`
     : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${message}</p>${redirectScript}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${message}</p>${closeScript}</body></html>`;
 }
 
 // Opens the browser to /link-node and listens on the loopback callback
 // port until the user approves/denies or timeoutMs elapses. Per
-// AUTH_FLOW.md 2.2-2.4. Not awaited by callers that want launch to stay
-// fast (see pairIfNeeded below) — the listening server keeps the Node
-// process alive on its own until this resolves, no extra plumbing needed.
+// AUTH_FLOW.md 2.2-2.4. Called from the onboarding wizard's pairing
+// step via the `pair-start` CLI subcommand below, which awaits this
+// directly (the wizard's own request just stays open for however long
+// the user takes in their browser) — no separate polling/job system.
 export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
   const sessionNonce = crypto.randomBytes(24).toString("base64url");
   const device = deviceName();
@@ -94,7 +103,7 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
 
       if (params.get("denied")) {
         res.writeHead(200, { "content-type": "text/html" });
-        res.end(htmlPage("Pairing cancelled. You can close this tab."));
+        res.end(htmlPage("Pairing cancelled. You can close this tab.", { closeSelf: true }));
         finish(() => resolve({ ok: false, denied: true }));
         return;
       }
@@ -124,7 +133,7 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
         paired_at: new Date().toISOString(),
       });
       res.writeHead(200, { "content-type": "text/html" });
-      res.end(htmlPage("Paired — taking you to the Interface...", interfaceUrl()));
+      res.end(htmlPage("Paired! You can close this tab.", { closeSelf: true }));
       finish(() => resolve({ ok: true, node_id, context_id }));
     });
 
@@ -189,31 +198,6 @@ export async function heartbeat() {
   }
   const data = await res.json().catch(() => ({}));
   return { ok: true, data };
-}
-
-// Called from launch.mjs after the BYO key gate (order matters, see
-// CLAUDE.md). Non-blocking by design: pairing is not required for MVP
-// chat (dev plan section 3 doesn't list it), so this starts the flow and
-// logs its eventual outcome without making the launcher wait on it — the
-// user can start chatting immediately and pair whenever they finish the
-// browser flow, or not at all.
-export function pairIfNeeded() {
-  if (isPaired()) {
-    heartbeat().catch(() => {});
-    return;
-  }
-  console.log("Node is not paired with psyntient.io — opening the pairing flow (not blocking chat)...");
-  pairStart()
-    .then((result) => {
-      if (result.ok) {
-        console.log(`Paired with context ${result.context_id}.`);
-      } else if (result.denied) {
-        console.log("Pairing was cancelled.");
-      }
-    })
-    .catch((err) => {
-      console.error(`Pairing did not complete: ${err.message}`);
-    });
 }
 
 export const paths = { PSYNTIENT_DIR, NODE_KEY_PATH };

@@ -3,9 +3,9 @@
 // heartbeat() at startup and every ~5 minutes after, per AUTH_FLOW.md
 // 3.1 ("Call at daemon start and every ~5 minutes... Keep it <=5 min" for
 // revocation latency). Keeps looping even while unpaired — isPaired() is
-// checked each cycle so pairing completed later (pairIfNeeded() is
-// non-blocking, see pairing.mjs) is picked up automatically without
-// needing to restart this loop.
+// checked each cycle so pairing completed later (via the onboarding
+// wizard, see pairing.mjs's pairStart()) is picked up automatically
+// without needing to restart this loop.
 import { heartbeat, isPaired } from "./pairing.mjs";
 
 const INTERVAL_MS = 5 * 60 * 1000;
