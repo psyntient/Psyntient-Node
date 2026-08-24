@@ -49,8 +49,15 @@ function writeProviders(data) {
 
 // Ground truth is OpenClaw's own auth store, not our metadata file — the
 // two can't be allowed to silently diverge.
+//
+// `models auth list` has real, observed CLI startup/work cost of its
+// own -- timed the raw command directly during onboarding-wizard
+// testing at ~10-20s, occasionally exceeding runCli's 20s default
+// (especially right after a Gateway restart) and surfacing as a 500 to
+// the wizard instead of resolving. 45s gives real headroom without
+// masking a genuine hang.
 export async function hasAnyProvider() {
-  const result = await jsonCommand(["models", "auth", "list"]);
+  const result = await jsonCommand(["models", "auth", "list"], { timeoutMs: 45000 });
   return Array.isArray(result?.profiles) && result.profiles.length > 0;
 }
 
@@ -63,7 +70,7 @@ export async function setProviderKey(providerId, apiKey) {
     throw new Error("API key must not be empty");
   }
 
-  const existing = await jsonCommand(["models", "auth", "list", "--provider", providerId]);
+  const existing = await jsonCommand(["models", "auth", "list", "--provider", providerId], { timeoutMs: 45000 });
   const profileId = existing?.profiles?.[0]?.id || `${providerId}:manual`;
 
   const result = await runCli(
