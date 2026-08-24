@@ -61,6 +61,51 @@ export async function hasAnyProvider() {
   return Array.isArray(result?.profiles) && result.profiles.length > 0;
 }
 
+// Psyntient product policy, not upstream OpenClaw behavior: OpenRouter is the
+// one provider where a single BYO key unlocks a huge model catalog with
+// wildly different cost/latency profiles, so give it a cheap conversational
+// default and let the research-agent skill escalate per-invocation via
+// sessions_spawn({model}). Direct-provider keys (anthropic/openai/etc.) keep
+// that provider's own default untouched -- this only ever fires for
+// providerId === "openrouter".
+export function isOpenRouterModelRef(modelRef) {
+  return typeof modelRef === "string" && modelRef.startsWith("openrouter/");
+}
+
+const OPENROUTER_STOCK_DEFAULTS = new Set([undefined, null, "", "openrouter/auto"]);
+// NOT "openrouter/google/gemini-flash-latest" -- that's OpenRouter's own
+// listing-only alias (shown with a "~" prefix in their /api/v1/models
+// catalog) and is NOT directly invokable via the completions API; a live
+// `openclaw infer model run --gateway` call against it returns
+// "FailoverError: The selected model was not found by the provider." This
+// is almost certainly the exact undiagnosed failure logged in
+// memory/2026-08-23.md ("Attempted switch to Gemini 2.5 Flash failed and
+// reverted to auto") -- someone tried an alias-style string instead of a
+// concrete, dated model id. Verified live: this concrete id resolves and
+// returns a real completion.
+const OPENROUTER_CHAT_DEFAULT = "openrouter/google/gemini-3.7-flash";
+
+// Only applies the Flash default when model.primary is still the stock value
+// -- never overwrites a value the user (or a later Settings change)
+// deliberately set, including a deliberate switch back to "openrouter/auto".
+// Verified live: `openclaw config get <path> --json` returns the raw value
+// directly (e.g. "openrouter/auto"), NOT wrapped in an object -- compare
+// `current` itself, not `current?.value`.
+//
+// 30s timeout, not runCli's 20s default: observed live during this feature's
+// own implementation that plain `config get`/`config set` calls -- normally
+// fast -- occasionally ran past 20s under real network conditions (unrelated
+// npm/registry traffic contending for the same sqlite-backed config store).
+export async function applyOpenRouterChatDefault() {
+  const current = await jsonCommand(["config", "get", "agents.defaults.model.primary"], { timeoutMs: 30000 });
+  if (!OPENROUTER_STOCK_DEFAULTS.has(current)) return { changed: false };
+  const result = await runCli(["config", "set", "agents.defaults.model.primary", OPENROUTER_CHAT_DEFAULT], { timeoutMs: 30000 });
+  if (result.code !== 0) {
+    throw new Error(`Failed to set OpenRouter chat default: ${result.stderr || result.stdout}`);
+  }
+  return { changed: true, model: OPENROUTER_CHAT_DEFAULT };
+}
+
 // Add, replace, or rotate — one path for all three (Settings must reuse
 // this exact function, not a second implementation; see CLAUDE.md). If a
 // profile already exists for this provider, its key is overwritten in
@@ -87,6 +132,8 @@ export async function setProviderKey(providerId, apiKey) {
     configuredAt: new Date().toISOString(),
   };
   writeProviders(data);
+
+  if (providerId === "openrouter") await applyOpenRouterChatDefault();
 
   await restart();
   return { ok: true };
