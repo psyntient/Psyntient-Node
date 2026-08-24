@@ -1,0 +1,9 @@
+{
+  "name": "psyntient-node-daemon",
+  "private": true,
+  "type": "module",
+  "description": "Dependencies for daemon/*.mjs — not a build target, no scripts.",
+  "dependencies": {
+    "@fugood/whisper.node": "^1.1.2"
+  }
+}
