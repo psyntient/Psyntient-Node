@@ -217,3 +217,29 @@ export function pairIfNeeded() {
 }
 
 export const paths = { PSYNTIENT_DIR, NODE_KEY_PATH };
+
+// CLI fallback — lets the Interface's onboarding wizard shell out to
+// this instead of importing daemon code directly (same reasoning as
+// vault.mjs/working-memory.mjs). `pair-start` blocks until the user
+// approves/denies in their browser or the flow times out (5min
+// default) — the caller (an HTTP request the wizard is awaiting) is
+// expected to just stay open for that; there's no separate
+// start/poll job system.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [cmd] = process.argv.slice(2);
+  try {
+    if (cmd === "status") {
+      console.log(JSON.stringify({ isPaired: isPaired() }));
+    } else if (cmd === "pair-start") {
+      const result = await pairStart();
+      console.log(JSON.stringify(result));
+      if (!result.ok) process.exitCode = 1;
+    } else {
+      console.log("Usage: node daemon/pairing.mjs status | pair-start");
+      process.exitCode = 1;
+    }
+  } catch (err) {
+    console.error(err.message);
+    process.exitCode = 1;
+  }
+}

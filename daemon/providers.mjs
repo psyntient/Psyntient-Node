@@ -85,7 +85,7 @@ export async function setProviderKey(providerId, apiKey) {
   return { ok: true };
 }
 
-// CLI fallback for platforms without a native prompt (see prompt-macos.mjs).
+// CLI fallback, useful for manual testing outside the onboarding wizard.
 // Usage: echo "$API_KEY" | node daemon/providers.mjs add <provider>
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [cmd, providerId] = process.argv.slice(2);
