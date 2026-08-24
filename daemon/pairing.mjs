@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { openInBrowser } from "./open-browser.mjs";
+import { url as interfaceUrl } from "./interface-control.mjs";
 import { deviceName } from "./device-name.mjs";
 
 const PSYNTIENT_DIR = path.join(os.homedir(), ".psyntient");
@@ -62,22 +63,27 @@ function unpair(reason) {
 }
 
 // AUTH_FLOW.md 2.4 point 3 / MIGRATION_GUIDE.md section 2.6 originally
-// called for the success page to redirect to the local Interface — the
-// right call when pairing could be triggered without anything else
+// called for the success page to auto-redirect to the local Interface --
+// the right call when pairing could be triggered without anything else
 // waiting on it (the old non-blocking pairIfNeeded() flow that used to
 // call this). Now that pairing only ever happens from inside the
 // onboarding wizard's own tab (which is already awaiting this exact
-// pairStart() call and advances itself the moment it resolves), that
-// redirect just opens a confusing second copy of the Interface in this
-// browser-opened tab. Closes itself instead when possible (works when
-// the browser actually let a script-initiated tab close itself, which
-// isn't guaranteed) and always shows a static "you can close this"
-// message as the fallback -- no redirect either way.
-function htmlPage(message, { closeSelf = false } = {}) {
+// pairStart() call and advances itself the moment it resolves), an
+// automatic redirect here just opens a confusing second copy of the
+// Interface. Attempts window.close() (works only when the browser lets
+// a script-initiated tab close itself, which isn't guaranteed -- most
+// browsers block it for tabs opened via an OS-level "open URL" call
+// rather than window.open() from a page's own script) and always shows
+// a real clickable link back as the fallback a user can actually act on
+// -- not just a "you can close this" dead end with nothing to click.
+function htmlPage(message, { closeSelf = false, link = false } = {}) {
   const closeScript = closeSelf
     ? `<script>setTimeout(function(){window.close()},900)</script>`
     : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${message}</p>${closeScript}</body></html>`;
+  const linkHtml = link
+    ? `<p><a href="${interfaceUrl()}" style="color:#EEBC4A">Return to Psyntient Node →</a></p>`
+    : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;gap:12px"><p>${message}</p>${linkHtml}${closeScript}</body></html>`;
 }
 
 // Opens the browser to /link-node and listens on the loopback callback
@@ -103,14 +109,14 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
 
       if (params.get("denied")) {
         res.writeHead(200, { "content-type": "text/html" });
-        res.end(htmlPage("Pairing cancelled. You can close this tab.", { closeSelf: true }));
+        res.end(htmlPage("Pairing cancelled. You can close this tab.", { closeSelf: true, link: true }));
         finish(() => resolve({ ok: false, denied: true }));
         return;
       }
 
       if (params.get("session_nonce") !== sessionNonce) {
         res.writeHead(400, { "content-type": "text/html" });
-        res.end(htmlPage("Pairing failed: session mismatch. Please try again."));
+        res.end(htmlPage("Pairing failed: session mismatch. Please try again.", { link: true }));
         finish(() => reject(new Error("session_nonce mismatch on pairing callback")));
         return;
       }
@@ -120,7 +126,7 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
       const context_id = params.get("context_id");
       if (!node_token || !node_id || !context_id) {
         res.writeHead(400, { "content-type": "text/html" });
-        res.end(htmlPage("Pairing failed: incomplete response from psyntient.io."));
+        res.end(htmlPage("Pairing failed: incomplete response from psyntient.io.", { link: true }));
         finish(() => reject(new Error("incomplete pairing callback params")));
         return;
       }
@@ -133,7 +139,7 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
         paired_at: new Date().toISOString(),
       });
       res.writeHead(200, { "content-type": "text/html" });
-      res.end(htmlPage("Paired! You can close this tab.", { closeSelf: true }));
+      res.end(htmlPage("Paired! You can close this tab.", { closeSelf: true, link: true }));
       finish(() => resolve({ ok: true, node_id, context_id }));
     });
 
