@@ -97,10 +97,15 @@ Do not build a custom chat UI from scratch — rebrand WebClaw instead.
   checkout on the `psyntient` branch (commit `6e27ec7`, 2026-08-23), then
   extended across rebrand passes 2-3 (`fadfa51`, `6055ac6`, `bf270c3`) —
   Settings dialog, Sessions→Projects rename, and empty-state logo are
-  all done now. What's still genuinely open: ambient/motion polish
-  (gold glints, subtle entrances per spec §6) and a persistent top-bar
-  Vault sync indicator/provider badge — spec §6 calls for one, only a
-  Settings-page Vault section exists so far (Phase H).
+  all done now. **Phase K (Branding/trim) closed out 2026-08-24**: added
+  the top-bar Vault sync indicator/provider badge spec §6 calls for
+  (`VaultBadge`, hover popup shows path + writable status, fetches the
+  same `/api/vault` route Settings uses); added the `psy-aura` "live
+  dot" keyframe spec §7 names for exactly this (scale 1→1.18, opacity
+  .35→.7, 7s ease-in-out) on the badge's status dot; added the global
+  `prefers-reduced-motion` rule spec §7 requires — checked, nothing in
+  this app honored it before, a real gap not just unfinished polish.
+  Nothing product-blocking remains from the branding spec.
 - **Keep** WebClaw's strong UX pieces: voice-to-text, streaming text
   appearance/highlight, settings page, chat threads. Trim excess chrome.
   Map WebClaw "threads" to "Projects" + open chat (not yet done).

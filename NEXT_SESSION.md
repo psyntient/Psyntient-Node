@@ -5,13 +5,29 @@ Read this first when starting a new session on this repo. Also read
 
 ## Status as of 2026-08-24
 
-**Phases A–I complete (9 of 12). Phase J (Noetic API) is substantially
-built but explicitly PAUSED, blocked on a DNS record — see below.**
-Skipping ahead to **K (Branding)** at the user's direction; come back
-to J once `archive.psyntient.io` exists. Locked order:
-A Skeleton → B Daemon/GUI → C BYO key → E WebClaw Interface → D Cortex_Agent
-→ F PWA → G Pairing → H Vault → I Working_Memory → J Noetic API (paused)
-→ **K Branding** → L Installer.
+**Phases A–I and K complete (10 of 12). Phase J (Noetic API) is
+substantially built but explicitly PAUSED, blocked on a DNS record —
+see below.** Locked order: A Skeleton → B Daemon/GUI → C BYO key →
+E WebClaw Interface → D Cortex_Agent → F PWA → G Pairing → H Vault →
+I Working_Memory → J Noetic API (paused) → K Branding (done) →
+**L Installer**.
+
+## Phase K (Branding) — done, 2026-08-24
+
+Checked the actual Development Plan entry first (it's just "Branding /
+trim", no checklist) and cross-referenced the real branding spec
+(Project_v2.md §6) against what Phase E's rebrand passes already
+covered — almost everything was already done. Closed the two genuine
+gaps: a top-bar Vault sync indicator/provider badge (`vault-badge.tsx`,
+new, wired into `chat-header.tsx`, fetches the same `/api/vault` route
+Settings already used) and the branding spec's named motion system
+(`psy-aura` keyframe for the badge's live dot, plus a global
+`prefers-reduced-motion` rule that — checked — nothing in this app
+honored before this, a real accessibility gap). Also fixed a stale
+CLAUDE.md line that still listed three items as "open" that later
+rebrand passes had actually already finished. Verified live on both
+the dev server and the rebuilt production Interface. Nothing
+product-blocking remains from the branding spec.
 
 Full phase-by-phase history (what was built, bugs found/fixed, how each
 was verified) lives in the auto-memory file `project_psyntient_node_overview.md`
@@ -170,12 +186,15 @@ don't start building without re-confirming scope:
 
 ## Immediate next step
 
-**Phase K (Branding)** — user explicitly asked to skip ahead to this
-while Phase J is blocked on DNS. Branding was largely already satisfied
-by Phase E's rebrand pass (colors/fonts/logo/avatar/terminology/empty
-state/buttons — see the Rebrand-pass entries in
-`project_psyntient_node_overview.md`), so this is likely a trim/polish
-pass rather than a from-scratch effort — check what's already done
-before assuming there's a lot left. Don't start Phase J work again
-until the user confirms the DNS record is ready (check
-`dig +short archive.psyntient.io` rather than assuming either way).
+**Phase K is done** (see above). Two real options, ask which:
+1. **Phase L (Installer)** — next in locked order, but explicitly
+   deferred multiple times this session as low-priority until close to
+   done overall; check with the user before assuming it's actually
+   wanted now.
+2. **Resume Phase J** — only if the user confirms
+   `archive.psyntient.io`'s DNS record is ready. Check
+   `dig +short archive.psyntient.io` yourself rather than assuming
+   either way; don't restart Phase J work otherwise.
+
+Don't just pick one — the user has steered phase order explicitly
+every time this session.
