@@ -94,10 +94,13 @@ Do not build a custom chat UI from scratch — rebrand WebClaw instead.
   `theme.json` in the same directory is a machine-readable token subset of
   it. Logo/avatar source images are in `Noetic_Interface/branding/assets/`.
   Never ship WebClaw's default look. Applied to the `Noetic_Interface/web/`
-  checkout on the `psyntient` branch (commit `6e27ec7`, 2026-08-23) — see
-  that commit message for exactly what was and wasn't touched yet
-  (Settings dialog, Sessions→Projects rename, empty-state logo, and a
-  radius/motion audit are still open).
+  checkout on the `psyntient` branch (commit `6e27ec7`, 2026-08-23), then
+  extended across rebrand passes 2-3 (`fadfa51`, `6055ac6`, `bf270c3`) —
+  Settings dialog, Sessions→Projects rename, and empty-state logo are
+  all done now. What's still genuinely open: ambient/motion polish
+  (gold glints, subtle entrances per spec §6) and a persistent top-bar
+  Vault sync indicator/provider badge — spec §6 calls for one, only a
+  Settings-page Vault section exists so far (Phase H).
 - **Keep** WebClaw's strong UX pieces: voice-to-text, streaming text
   appearance/highlight, settings page, chat threads. Trim excess chrome.
   Map WebClaw "threads" to "Projects" + open chat (not yet done).
