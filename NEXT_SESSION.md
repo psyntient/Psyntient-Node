@@ -3,12 +3,15 @@
 Read this first when starting a new session on this repo. Also read
 `CLAUDE.md` (hard rules) — this doc is status/next-step only, not rules.
 
-## Status as of 2026-08-23
+## Status as of 2026-08-24
 
-**Phases A–I complete (9 of 12).** Locked order:
+**Phases A–I complete (9 of 12). Phase J (Noetic API) is substantially
+built but explicitly PAUSED, blocked on a DNS record — see below.**
+Skipping ahead to **K (Branding)** at the user's direction; come back
+to J once `archive.psyntient.io` exists. Locked order:
 A Skeleton → B Daemon/GUI → C BYO key → E WebClaw Interface → D Cortex_Agent
-→ F PWA → G Pairing → H Vault → I Working_Memory → **J Noetic API** →
-K Branding → L Installer.
+→ F PWA → G Pairing → H Vault → I Working_Memory → J Noetic API (paused)
+→ **K Branding** → L Installer.
 
 Full phase-by-phase history (what was built, bugs found/fixed, how each
 was verified) lives in the auto-memory file `project_psyntient_node_overview.md`
@@ -44,6 +47,99 @@ wasn't fully identified. The working-memory sync is wired to
 backstop — see CLAUDE.md section 9 before re-wiring anything in this
 area to `onChatEvent`'s `'final'` state.
 
+## Phase J (Noetic API) — PAUSED, blocked on DNS, resume steps below
+
+This is real, substantial, tested infrastructure — but it's not in
+*this* git repo. It lives entirely on a separate DigitalOcean droplet
+(the Noetic Archive backend), reachable via
+`ssh root@147.182.188.20` (password given directly by the user in
+chat this session — not written here; ask the user again if a fresh
+session needs it, don't assume it's unchanged). Scope of droplet
+access is explicitly limited to `/opt/Noetic_Archive_Current/` — never
+touch anything else on that box without asking first.
+
+**What's built and verified (2026-08-24):**
+
+```
+/opt/Noetic_Archive_Current/
+├── Latest Archive Edition/       git clone of psyntient/The-Noetic-Archive,
+│                                  data only, Architect can swap wholesale.
+│                                  Currently incomplete upstream (only
+│                                  archetype JSON, no packets/sqlite yet —
+│                                  see ARCHITECT_RELEASE_CONTRACT.md inside it,
+│                                  also copied to /root/The-Architect/ on
+│                                  the same droplet).
+├── Noetic_API_Backend/           FastAPI app, now its own git repo
+│   ├── app/{main,db,models,auth}.py
+│   ├── build_edition_sqlite.py    rebuilds data/edition.sqlite from
+│   │                                Latest Archive Edition (prefers a
+│   │                                prebuilt edition.sqlite if present,
+│   │                                else assembles from raw JSON)
+│   ├── deploy/noetic-api.service   copy of the live systemd unit
+│   ├── venv/                        gitignored
+│   ├── data/edition.sqlite          gitignored (generated)
+│   └── .env                         gitignored (INTERNAL_SERVICE_KEY, secret)
+└── Ingestion_Queue/               pending/ ingested/ rejected/ + README —
+                                     where POST /api/v1/ingest/packets
+                                     writes; Architect-owned from there.
+```
+
+Running as a real systemd service (`noetic-api.service`, enabled,
+survives reboot), currently bound to `127.0.0.1:8000` only — **not
+reachable from outside the droplet yet**, which is exactly the blocker.
+
+**Endpoints, all live-tested:** `/api/v1/meta`, `/api/v1/archetypes`
+(+ `/{id}`, `/{id}/packets`), `/api/v1/packets` (+ `/{id}`,
+`/{id}/archetypes`), `/api/v1/search`, `POST /api/v1/ingest/packets`,
+`GET /api/v1/ingest/status/{id}`, `/docs`, `/api/v1/openapi.json`.
+Currently serving real data from the one edition that exists: 25
+archetypes, 0 packets/mappings (upstream gap, see contract doc above).
+
+**Auth is real, not a stub.** `app/auth.py` calls
+`POST https://psyntient.io/api/public/nodes/verify-token` (built by
+Lovable AI, who maintains the psyntient.io backend — Postgres/Supabase
+behind TanStack Start on Cloudflare Workers) with an
+`X-Internal-Service-Key` header, matched by `INTERNAL_SERVICE_KEY` in
+the backend's `.env` (root-only readable, gitignored). Verified
+end-to-end live against the real production endpoint. Every
+`/api/v1/*` data route requires this (not just ingest) — "no Archive
+access without an active paired Node" is enforced for real now.
+Caches `valid:true` results 60s (keyed by a local hash of the token,
+never the raw token) to avoid a round-trip per request; fails closed
+on any error. **Known, deliberate limitation:** a token revoked while
+already cached stays usable for up to that 60s window — asked, not
+fixed, since fixing it means a network round-trip on every request.
+
+**The actual blocker:** the API needs a real hostname to get a valid
+TLS cert (a bare IP won't work cleanly). Chosen: `archive.psyntient.io`
+→ `147.182.188.20`. User is asking Lovable (or whoever holds the DNS
+zone — hints suggest possibly Cloudflare, not confirmed) to add that A
+record. **Do not assume it exists — check first:**
+`dig +short archive.psyntient.io` (or `nslookup`) before doing anything
+else in this phase.
+
+**Resume steps once the DNS record resolves:**
+1. Confirm it resolves to `147.182.188.20`.
+2. Install Caddy on the droplet (already pre-approved by the user —
+   single binary, automatic HTTPS/cert renewal, chosen over
+   nginx+certbot for simplicity). Point it at `archive.psyntient.io`,
+   proxying to `127.0.0.1:8000`.
+3. Add a `ufw` firewall (currently `inactive` — checked) allowing only
+   22/80/443, deny the rest, before this goes fully public.
+4. Real proof step: call `https://archive.psyntient.io/api/v1/meta`
+   using *this actual Node's* own `node_token` from
+   `~/.psyntient/node.key` and confirm real data comes back — not a
+   synthetic test token.
+5. Then decide: does the Node itself get a client module
+   (`daemon/`-side) for calling this API, or does WebClaw's Interface
+   call it directly? Not yet designed — a real open question for when
+   this resumes, don't assume either direction.
+
+Two prompts already drafted and sent to Lovable this session (in case
+a third round-trip is needed, same tone/precision worked well both
+times): one for the verify-token endpoint (delivered, works), one for
+the DNS record (sent, outcome not yet confirmed as of this doc).
+
 ## Deferred: Cloud Vault (Google Drive) via OAuth
 
 Discussed but explicitly **paused, not started** — pick back up later,
@@ -74,7 +170,12 @@ don't start building without re-confirming scope:
 
 ## Immediate next step
 
-Ask the user whether to start Phase J (Noetic API) now, or prioritize
-something else (K/L, or resume the Google OAuth Vault work once
-credentials exist). Don't assume — the user has been steering phase
-order explicitly every time this session.
+**Phase K (Branding)** — user explicitly asked to skip ahead to this
+while Phase J is blocked on DNS. Branding was largely already satisfied
+by Phase E's rebrand pass (colors/fonts/logo/avatar/terminology/empty
+state/buttons — see the Rebrand-pass entries in
+`project_psyntient_node_overview.md`), so this is likely a trim/polish
+pass rather than a from-scratch effort — check what's already done
+before assuming there's a lot left. Don't start Phase J work again
+until the user confirms the DNS record is ready (check
+`dig +short archive.psyntient.io` rather than assuming either way).

@@ -573,5 +573,20 @@ touched again, keep that distinction.
 
 ---
 
+## 10. Noetic API backend (Phase J) — lives outside this repo, on a droplet
+
+Real, substantial infrastructure exists for this already, but **none
+of it is in `Psyntient_Node` git history** — it's entirely on a
+separate DigitalOcean droplet (SSH access scope explicitly limited to
+`/opt/Noetic_Archive_Current/` on that box; the droplet's own code is
+git-tracked there, just not here). Status as of 2026-08-24: **paused**,
+blocked on a DNS record (`archive.psyntient.io`) that hasn't been
+confirmed yet — don't assume it exists, check first. Full detail,
+exact resume steps, and things not to assume: `NEXT_SESSION.md`'s
+"Phase J" section. Don't rebuild any of this from scratch without
+reading that first.
+
+---
+
 See `Psyntient_Node_Development_Plan.md` and `Psyntient_Node_Project_v2.md`
 (spec v2.4, wins on conflicts) for full product context.
