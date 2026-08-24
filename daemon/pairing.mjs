@@ -141,7 +141,20 @@ export function pairStart({ timeoutMs = 5 * 60 * 1000 } = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      server.close(() => action());
+      // Real bug found live: server.close(callback) only fires its
+      // callback once every open connection has fully closed on its
+      // own -- browsers commonly keep the response connection alive
+      // (HTTP keep-alive) even after rendering the success page, which
+      // meant this callback (and therefore action(), and therefore the
+      // whole pairStart() promise) could hang indefinitely with the
+      // callback server process never exiting, even though pairing had
+      // actually already succeeded. Resolve/reject immediately instead
+      // -- the pairing outcome is already fully known at this point --
+      // and force-close any lingering connections separately rather
+      // than waiting on them.
+      action();
+      server.close();
+      server.closeAllConnections?.();
     }
 
     const timer = setTimeout(() => {
