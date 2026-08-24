@@ -7,10 +7,67 @@ Read this first when starting a new session on this repo. Also read
 
 **Phases A–I and K complete (10 of 12). Phase J (Noetic API) is
 substantially built but explicitly PAUSED, blocked on a DNS record —
-see below.** Locked order: A Skeleton → B Daemon/GUI → C BYO key →
-E WebClaw Interface → D Cortex_Agent → F PWA → G Pairing → H Vault →
-I Working_Memory → J Noetic API (paused) → K Branding (done) →
-**L Installer**.
+see below.** The onboarding wizard (originally scoped as "build after
+H–L") was also built this session, ahead of L, at the user's direction
+— see its own section below. Locked order: A Skeleton → B Daemon/GUI →
+C BYO key → E WebClaw Interface → D Cortex_Agent → F PWA → G Pairing →
+H Vault → I Working_Memory → J Noetic API (paused) → K Branding (done)
+→ **L Installer** (in progress, paused mid-discussion for the
+onboarding wizard detour).
+
+## Onboarding wizard — built and verified end-to-end, 2026-08-24
+
+Full detail: CLAUDE.md's "First-run order" section (rewritten, no
+longer describes the interim flow — that's deleted, not kept). Short
+version: replaces the old native-macOS-dialog BYO-key gate +
+non-blocking pairing with a real in-Interface wizard (welcome → API
+key with a live connection test → mandatory pairing → Vault
+explanation with cloud visibly disabled/"coming soon" → chat), gated
+by a new `OnboardingGate` wrapping the whole app in `__root.tsx`.
+
+**Two real bugs found and fixed, worth knowing before touching this
+area again:**
+1. The gate must set `checked=true` on the redirect-to-`/onboarding`
+   branch, not just the already-complete branch — otherwise it blocks
+   its own destination forever (silent infinite loading, easy to
+   mistake for a slow check that just needs more patience — it doesn't,
+   it never resolves without the fix).
+2. `hasAnyProvider()` (`openclaw models auth list`) genuinely costs
+   ~10-15s of real CLI work — timed the raw command directly to rule
+   out subprocess-nesting overhead. Mitigated with a `sessionStorage`
+   cache so it's paid once per browser session, not once per page load
+   (would have been a real regression for returning users vs. the old
+   once-per-app-*launch* interim check). Both gate layers show a real
+   loading state now, never a blank screen, for the unavoidable first
+   check.
+
+**Verified end-to-end for real** on the rebuilt production Interface
+(port 3210) using this actual dev Node's real state (already had a
+provider key + real pairing from earlier phases): correctly resumed at
+the Vault step, showed the real local path, clicked Continue, landed
+on real chat, confirmed `~/.psyntient/onboarding-complete` was
+actually written, confirmed a same-tab reload skips straight to chat
+with no recheck.
+
+**Known gap, not glossed over:** Welcome/API-key/Pairing steps'
+*rendering* wasn't independently visually verified — this machine's
+Node was already fully onboarded, so reaching those steps live would
+have meant deliberately breaking real working state (a fresh provider
+key overwrite, or a real duplicate pairing registration, matching a
+mistake already made once earlier this session). Their backing
+endpoints were each verified directly via curl instead, and the UI
+reuses already-proven component patterns. A genuinely fresh install
+exercising steps 1-3 live hasn't happened yet — worth doing if a real
+fresh-install scenario comes up (a new test machine, or a deliberate
+backup/wipe/restore of this one's provider+pairing state).
+
+**Also found and fixed in passing:** the dev server (port 3111) hit a
+genuine hydration-crash bug this session, confirmed pre-existing and
+unrelated to the onboarding work (reproduced identically with
+`OnboardingGate` removed entirely) — not fixed, just correctly ruled
+out as a red herring. Production builds (port 3210) don't exhibit it.
+If dev-server testing in this area seems broken again, verify via a
+production rebuild before assuming new code is at fault.
 
 ## Phase K (Branding) — done, 2026-08-24
 
@@ -186,15 +243,43 @@ don't start building without re-confirming scope:
 
 ## Immediate next step
 
-**Phase K is done** (see above). Two real options, ask which:
-1. **Phase L (Installer)** — next in locked order, but explicitly
-   deferred multiple times this session as low-priority until close to
-   done overall; check with the user before assuming it's actually
-   wanted now.
-2. **Resume Phase J** — only if the user confirms
-   `archive.psyntient.io`'s DNS record is ready. Check
-   `dig +short archive.psyntient.io` yourself rather than assuming
-   either way; don't restart Phase J work otherwise.
+**Phase L (Installer) is actively in progress** — the user chose this
+over resuming Phase J, then paused mid-design-discussion to build the
+onboarding wizard first (done, see above). Pick L back up next unless
+told otherwise. State when it was paused:
 
-Don't just pick one — the user has steered phase order explicitly
-every time this session.
+- Confirmed direction (matches spec §3.1 closely): installer offers
+  Local (Mac/Windows/Linux) vs. Remote server (user-supplied SSH key)
+  vs. DigitalOcean droplet (API token, for less technical users).
+- Real gaps found in the *existing* macOS launcher
+  (`daemon/macos/Psyntient Node.app`) while discussing this — not yet
+  fixed:
+  - No custom icon at all (`Info.plist` has no `CFBundleIconFile`,
+    uses the generic macOS blank-document icon).
+  - `Contents/MacOS/launcher` hardcodes
+    `NODE_ROOT="/Users/woodleybrown/Psyntient_Node"` — only works on
+    this exact dev machine. Needs to resolve its own install location
+    dynamically (standard macOS pattern: derive from the bundle's own
+    path, not a literal string) before this can ship to anyone else.
+  - Windows and Linux have no launcher equivalent yet at all (no
+    `.desktop` entry, no MSI/Start Menu equivalent) — genuinely
+    unstarted, not just unpolished.
+- Three open questions raised, not yet answered by the user:
+  1. SSH-key handling for remote install — paste an existing private
+     key into the installer UI, or have the installer generate a fresh
+     keypair and show the public half to add to the target server?
+  2. DigitalOcean API token — same credential-hygiene treatment as
+     other secrets handled this session (never logged, never
+     committed, stored only where strictly needed)?
+  3. Bundled vs. system Node runtime — does the installer ship its own
+     Node so this becomes a real zero-dependency install, or is
+     "already have Node" an acceptable v1 requirement?
+- Proposed starting point (not yet confirmed): fix the two real macOS
+  launcher gaps first (icon + hardcoded path), then build Windows/Linux
+  equivalents, before tackling remote-server/DigitalOcean install
+  targets as a second pass — local is furthest along already.
+
+Resume Phase J instead only if the user confirms
+`archive.psyntient.io`'s DNS record is ready — check
+`dig +short archive.psyntient.io` yourself rather than assuming either
+way.
