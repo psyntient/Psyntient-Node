@@ -108,11 +108,56 @@ function vaultProjectDir(projectId) {
   return path.join(getVaultRoot(), "Devices", deviceName(), projectId);
 }
 
+// Filenames only -- no subdirectories, no path traversal. Deliberately
+// stricter than SAFE_ID (allows dots, for extensions) but still a plain
+// token, not an arbitrary relative path.
+const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+
+const ARTIFACT_CONTENT_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+  ".csv": "text/csv",
+};
+
+// Resolves a research artifact (chart, exported table, etc.) the agent
+// generated for a project. Same prefer-working-copy-over-Vault precedence
+// as getProjectDetail()'s notes handling -- the working copy is the live
+// version; Vault's exports/ is what's left once a project's working copy
+// has been synced/erased. Returns null (not a throw) when nothing matches,
+// since "not found" is a normal, expected outcome for a route to turn into
+// a 404 rather than a 500.
+export function resolveProjectArtifact(projectId, filename) {
+  assertSafeId(projectId, "projectId");
+  if (typeof filename !== "string" || !SAFE_FILENAME.test(filename)) {
+    throw new Error(`Invalid artifact filename: ${JSON.stringify(filename)}`);
+  }
+  const ext = path.extname(filename).toLowerCase();
+  const contentType = ARTIFACT_CONTENT_TYPES[ext];
+  if (!contentType) {
+    throw new Error(`Unsupported artifact type: ${ext || "(none)"}`);
+  }
+
+  const workingPath = path.join(workingProjectDir(projectId), "scratch", filename);
+  if (fs.existsSync(workingPath)) {
+    return { path: workingPath, contentType };
+  }
+  const vaultPath = path.join(vaultProjectDir(projectId), "exports", filename);
+  if (fs.existsSync(vaultPath)) {
+    return { path: vaultPath, contentType };
+  }
+  return null;
+}
+
 // Scaffolds both the Working_Memory working copy and the Vault's
 // permanent Devices/<device>/<project>/ home. Idempotent — safe to call
 // again for an existing project (never overwrites notes.md or an
 // existing .project.json).
-export function createProject({ projectId, title }) {
+export function createProject({ projectId, title, modality }) {
   assertSafeId(projectId, "projectId");
 
   const workDir = workingProjectDir(projectId);
@@ -134,7 +179,18 @@ export function createProject({ projectId, title }) {
     fs.writeFileSync(
       projectJsonPath,
       JSON.stringify(
-        { projectId, title: title || projectId, device: deviceName(), createdAt: new Date().toISOString() },
+        {
+          projectId,
+          title: title || projectId,
+          device: deviceName(),
+          createdAt: new Date().toISOString(),
+          // Loose, not a validated enum -- see research-agent SKILL.md.
+          // Lets the skill pick the right methodology/tooling for local
+          // analysis today, and is the single source of truth that would
+          // gate Archive-eligibility + Observation Packet schema selection
+          // once Node API/Archive integration exists (currently paused).
+          modality: modality || null,
+        },
         null,
         2,
       ) + "\n",
@@ -313,7 +369,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const messages = raw.trim() ? JSON.parse(raw) : [];
       console.log(JSON.stringify(syncThreadHistory(threadId, messages)));
     } else if (cmd === "create-project" && rest[0]) {
-      console.log(JSON.stringify(createProject({ projectId: rest[0], title: rest[1] })));
+      console.log(
+        JSON.stringify(createProject({ projectId: rest[0], title: rest[1], modality: rest[2] })),
+      );
     } else if (cmd === "sync-project" && rest[0]) {
       console.log(JSON.stringify(syncProjectToVault(rest[0])));
     } else if (cmd === "erase-project" && rest[0]) {
@@ -324,9 +382,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(listProjects()));
     } else if (cmd === "project-detail" && rest[0]) {
       console.log(JSON.stringify(getProjectDetail(rest[0])));
+    } else if (cmd === "resolve-artifact" && rest[0] && rest[1]) {
+      console.log(JSON.stringify(resolveProjectArtifact(rest[0], rest[1])));
     } else {
       console.log(
-        "Usage: node daemon/working-memory.mjs ensure-scaffold | list-threads | sync-thread <threadId> (messages JSON on stdin) | create-project <projectId> [title] | sync-project <projectId> | erase-project <projectId> | project-status <projectId> | list-projects | project-detail <projectId>",
+        "Usage: node daemon/working-memory.mjs ensure-scaffold | list-threads | sync-thread <threadId> (messages JSON on stdin) | create-project <projectId> [title] [modality] | sync-project <projectId> | erase-project <projectId> | project-status <projectId> | list-projects | project-detail <projectId> | resolve-artifact <projectId> <filename>",
       );
       process.exitCode = 1;
     }
