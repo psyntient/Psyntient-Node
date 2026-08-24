@@ -231,6 +231,60 @@ export function getProjectStatus(projectId) {
   };
 }
 
+// Lists every project that has a Working_Memory working copy. No UI-driven
+// create/rename/delete exists (those are research-agent-skill actions
+// during a conversation) -- this and getProjectDetail() below are read-only
+// listing/viewing support for the Interface's Projects sidebar section.
+export function listProjects() {
+  if (!fs.existsSync(CORTEX_PROJECTS_DIR)) return [];
+  return fs
+    .readdirSync(CORTEX_PROJECTS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => {
+      const projectId = e.name;
+      let meta = { projectId, title: projectId, createdAt: null, lastSyncedAt: null };
+      try {
+        const projectJson = JSON.parse(
+          fs.readFileSync(path.join(vaultProjectDir(projectId), ".project.json"), "utf8"),
+        );
+        meta = { ...meta, ...projectJson };
+      } catch {
+        // No Vault metadata yet -- shouldn't normally happen since
+        // createProject() scaffolds both sides together, but stay
+        // defensive rather than throwing on a listing call.
+      }
+      return meta;
+    });
+}
+
+export function getProjectDetail(projectId) {
+  assertSafeId(projectId, "projectId");
+  const status = getProjectStatus(projectId);
+  const vaultDir = vaultProjectDir(projectId);
+  let meta = { title: projectId, createdAt: null, lastSyncedAt: null };
+  try {
+    meta = {
+      ...meta,
+      ...JSON.parse(fs.readFileSync(path.join(vaultDir, ".project.json"), "utf8")),
+    };
+  } catch {
+    // no Vault metadata yet
+  }
+
+  // Prefer the working copy (live/current) over the Vault's synced copy if
+  // both exist -- it's the more up-to-date version.
+  const workingNotesPath = path.join(workingProjectDir(projectId), "notes.md");
+  const vaultNotesPath = path.join(vaultDir, "notes", "notes.md");
+  let notes = "";
+  if (fs.existsSync(workingNotesPath)) {
+    notes = fs.readFileSync(workingNotesPath, "utf8");
+  } else if (fs.existsSync(vaultNotesPath)) {
+    notes = fs.readFileSync(vaultNotesPath, "utf8");
+  }
+
+  return { ...status, ...meta, notes };
+}
+
 export const paths = { WM_DIR, CHAT_CONTEXT_DIR, CORTEX_PROJECTS_DIR };
 
 // CLI fallback, same pattern as vault.mjs — lets the Interface's
@@ -266,9 +320,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(eraseProjectWorkingCopy(rest[0])));
     } else if (cmd === "project-status" && rest[0]) {
       console.log(JSON.stringify(getProjectStatus(rest[0])));
+    } else if (cmd === "list-projects") {
+      console.log(JSON.stringify(listProjects()));
+    } else if (cmd === "project-detail" && rest[0]) {
+      console.log(JSON.stringify(getProjectDetail(rest[0])));
     } else {
       console.log(
-        "Usage: node daemon/working-memory.mjs ensure-scaffold | list-threads | sync-thread <threadId> (messages JSON on stdin) | create-project <projectId> [title] | sync-project <projectId> | erase-project <projectId> | project-status <projectId>",
+        "Usage: node daemon/working-memory.mjs ensure-scaffold | list-threads | sync-thread <threadId> (messages JSON on stdin) | create-project <projectId> [title] | sync-project <projectId> | erase-project <projectId> | project-status <projectId> | list-projects | project-detail <projectId>",
       );
       process.exitCode = 1;
     }
