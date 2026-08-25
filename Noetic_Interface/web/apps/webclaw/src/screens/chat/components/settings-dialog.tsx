@@ -19,6 +19,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTab } from '@/components/ui/tabs'
 import { useChatSettings } from '@/hooks/use-chat-settings'
+import { useInstallPrompt } from '@/hooks/use-install-prompt'
 import { Button } from '@/components/ui/button'
 
 type SettingsSectionProps = {
@@ -362,6 +363,40 @@ function VaultSection() {
   )
 }
 
+// Persistent alternative to install-banner.tsx's one-shot dismissible
+// nudge -- once dismissed (or if beforeinstallprompt never fires early
+// enough to be caught), this is the only remaining way to trigger
+// install. Same hook, same three states (real prompt / Safari manual /
+// generic bookmark), reused rather than duplicated.
+function InstallSection() {
+  const { canPrompt, isStandalone, fallbackKind, promptInstall } = useInstallPrompt()
+
+  return (
+    <SettingsSection title="App">
+      <SettingsRow
+        label="Install as an app"
+        description={
+          isStandalone
+            ? 'Running standalone, without the browser bar.'
+            : canPrompt
+              ? 'Open Psyntient Node without the browser bar.'
+              : fallbackKind === 'safari'
+                ? 'Tap Share, then Add to Dock.'
+                : 'Bookmark this page (⌘/Ctrl+D) for quick access.'
+        }
+      >
+        {isStandalone ? (
+          <span className="text-xs text-gold">Installed</span>
+        ) : canPrompt ? (
+          <Button size="sm" variant="gold" onClick={() => void promptInstall()}>
+            Install
+          </Button>
+        ) : null}
+      </SettingsRow>
+    </SettingsSection>
+  )
+}
+
 type SettingsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -466,6 +501,8 @@ export function SettingsDialog({
               </Tabs>
             </SettingsRow>
           </SettingsSection>
+
+          <InstallSection />
 
           <SettingsSection title="About">
             <div className="text-sm text-primary-800">Noetic Interface</div>
