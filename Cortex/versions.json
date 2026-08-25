@@ -4,13 +4,16 @@
       "path": "Cortex/Open-Claw",
       "remote": "https://github.com/openclaw/openclaw.git",
       "installedRef": "eb4eaea39b757228b575a671255fe9b4e2c2c891",
-      "lastUpdated": "2026-08-23"
+      "lastUpdated": "2026-08-23",
+      "mirror": "https://github.com/psyntient/openclaw-mirror.git",
+      "mirrorSyncedRef": "eb4eaea39b757228b575a671255fe9b4e2c2c891",
+      "mirrorNote": "Pinned-commit backup, not a fork/patch — pull from `remote` normally; `mirror` is fallback-only if upstream is unreachable, and must be re-synced (single-commit snapshot, not full history) whenever installedRef changes."
     },
     "cortex-agent": {
       "path": "Cortex/Cortex_Agent",
-      "remote": null,
-      "installedRef": "f6687bf23166928c516b763da46e163f07475294",
-      "lastUpdated": "2026-08-23"
+      "remote": "https://github.com/psyntient/Psyntient-Node.git",
+      "note": "Tracked directly in this repo (as of 2026-08-24), not a separate clone — no independent installedRef to pin.",
+      "lastUpdated": "2026-08-24"
     }
   }
 }
