@@ -6,6 +6,7 @@ import { WelcomeStep } from '@/screens/onboarding/welcome-step'
 import { ApiKeyStep } from '@/screens/onboarding/api-key-step'
 import { PairingStep } from '@/screens/onboarding/pairing-step'
 import { VaultStep } from '@/screens/onboarding/vault-step'
+import { InstallStep } from '@/screens/onboarding/install-step'
 import { ProcessingSpinner } from '@/screens/onboarding/processing-spinner'
 
 export const Route = createFileRoute('/onboarding')({
@@ -78,7 +79,8 @@ function OnboardingRoute() {
       {step === 'welcome' && <WelcomeStep onNext={() => setStep('key')} />}
       {step === 'key' && <ApiKeyStep onNext={() => setStep('pairing')} />}
       {step === 'pairing' && <PairingStep onNext={() => setStep('vault')} />}
-      {step === 'vault' && <VaultStep onNext={() => void finishOnboarding()} />}
+      {step === 'vault' && <VaultStep onNext={() => setStep('install')} />}
+      {step === 'install' && <InstallStep onNext={() => void finishOnboarding()} />}
     </div>
   )
 }

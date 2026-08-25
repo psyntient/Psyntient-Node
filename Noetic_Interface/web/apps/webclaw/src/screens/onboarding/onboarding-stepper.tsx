@@ -1,12 +1,13 @@
 import { cn } from '@/lib/utils'
 
-export type OnboardingStep = 'welcome' | 'key' | 'pairing' | 'vault'
+export type OnboardingStep = 'welcome' | 'key' | 'pairing' | 'vault' | 'install'
 
 const STEPS: Array<{ id: OnboardingStep; label: string }> = [
   { id: 'welcome', label: 'Welcome' },
   { id: 'key', label: 'Provider' },
   { id: 'pairing', label: 'Pairing' },
   { id: 'vault', label: 'Vault' },
+  { id: 'install', label: 'App' },
 ]
 
 export function OnboardingStepper({ current }: { current: OnboardingStep }) {
