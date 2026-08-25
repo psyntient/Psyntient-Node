@@ -144,6 +144,21 @@ OpenRouter (~0.67x on both prompt/completion pricing, verified live against
 OpenRouter's pricing API — `claude-haiku-4.5` is ~2.67x more expensive
 despite sounding like the more obvious pick).
 
+**Known gap, found and fixed 2026-08-25:** claude-3-haiku has no extended-thinking
+support at all, and OpenClaw's default-thinking-level resolver doesn't know
+that — it picked `"low"` for any anthropic/* model family regardless, which
+broke every single message (`Thinking level "low" is not supported for
+openrouter/anthropic/claude-3-haiku. Use one of: off.`). Fixed by pinning
+`agents.defaults.models["openrouter/anthropic/claude-3-haiku"].params.thinking
+= "off"`, applied automatically now by `daemon/providers.mjs`'s
+`applyOpenRouterChatDefault()` whenever it sets this default (so a fresh
+install doesn't hit the same breakage). Note for future CLI config edits:
+the dotted-path `config set agents.defaults.models."a/b/c".params.x` syntax
+does **not** correctly quote a slash-containing key — it writes the literal
+quote characters into the key name and silently fails to match at lookup.
+Use `config set agents.defaults.models '<json>' --replace --strict-json`
+with the full merged object instead.
+
 **This switch is a cost reduction, not a caching fix.** Initially assumed
 Claude-via-OpenRouter already gets `cache_control` support "for free" (a
 compat-matrix rule exists for it) — but a live two-message-same-session test

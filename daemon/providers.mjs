@@ -102,6 +102,33 @@ const OPENROUTER_STOCK_DEFAULTS = new Set([undefined, null, "", "openrouter/auto
 // not raw capability.
 const OPENROUTER_CHAT_DEFAULT = "openrouter/anthropic/claude-3-haiku";
 
+// claude-3-haiku has no extended-thinking support at all -- unlike newer
+// Claude models, it errors on every non-"off" thinking level ("Thinking
+// level \"low\" is not supported for openrouter/anthropic/claude-3-haiku.
+// Use one of: off."), and OpenClaw's own default-thinking-level resolver
+// doesn't know that and picks "low" for any anthropic/* model family.
+// Discovered live 2026-08-25: chat was fully broken (every message threw)
+// until this was set. Keyed here (not a blanket agents.defaults.thinkingDefault)
+// so it only touches this specific model and doesn't affect a future default
+// model swap that *does* support thinking.
+async function ensureThinkingOffForChatDefault() {
+  const models = (await jsonCommand(["config", "get", "agents.defaults.models"], { timeoutMs: 30000 })) || {};
+  if (models[OPENROUTER_CHAT_DEFAULT]?.params?.thinking === "off") return;
+  const merged = { ...models, [OPENROUTER_CHAT_DEFAULT]: { params: { thinking: "off" } } };
+  // Dotted-path `config set agents.defaults.models."a/b/c".params.thinking off`
+  // does NOT work here -- verified live that the quoted-segment syntax gets
+  // written as a literal key including the quote characters
+  // (`"openrouter/anthropic/claude-3-haiku"` as the actual object key), which
+  // silently fails to match at lookup time. Replace the whole map instead.
+  const result = await runCli(
+    ["config", "set", "agents.defaults.models", JSON.stringify(merged), "--replace", "--strict-json"],
+    { timeoutMs: 30000 },
+  );
+  if (result.code !== 0) {
+    throw new Error(`Failed to set thinking override for ${OPENROUTER_CHAT_DEFAULT}: ${result.stderr || result.stdout}`);
+  }
+}
+
 // Only applies the Flash default when model.primary is still the stock value
 // -- never overwrites a value the user (or a later Settings change)
 // deliberately set, including a deliberate switch back to "openrouter/auto".
@@ -120,6 +147,7 @@ export async function applyOpenRouterChatDefault() {
   if (result.code !== 0) {
     throw new Error(`Failed to set OpenRouter chat default: ${result.stderr || result.stdout}`);
   }
+  await ensureThinkingOffForChatDefault();
   return { changed: true, model: OPENROUTER_CHAT_DEFAULT };
 }
 
