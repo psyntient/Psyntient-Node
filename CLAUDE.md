@@ -511,6 +511,26 @@ boundary. This means:
   section 7's "Production serving" note above — that's intentionally not
   a real launchd/systemd service yet, and doesn't need to become one
   before Phase L).
+  - **Hard requirement for the install-location step, decided
+    2026-08-24 (from real prior experience, not a hypothetical):** the
+    §3.1 spec's "Install root (default `~/Psyntient_Node/`)" field must
+    not let a *local* install land inside a cloud-sync folder without a
+    hard-to-miss warning + explicit confirmation. Detect known
+    cloud-sync paths (`~/Library/Mobile Documents/com~apple~CloudDocs/`,
+    `~/Dropbox/`, `~/OneDrive/`, `~/Google Drive/`, and `~/Desktop`/
+    `~/Documents` on both macOS and Windows, since both now
+    default-sync those) before accepting a custom path. Real failure
+    modes, not theoretical: SQLite state/Working_Memory/Vault files
+    corrupt under concurrent app-write + cloud-sync-upload; macOS's
+    "Optimize Mac Storage" and Windows 11's OneDrive Files On-Demand can
+    evict `Cortex/Open-Claw/`'s files to cloud-only placeholders,
+    breaking Node's synchronous `require()` outright; and it silently
+    routes supposedly-local, sovereign Vault data through a third-party
+    cloud provider the user never chose for that purpose. Warn and
+    require confirmation, don't silently block — a power user may have
+    a real reason — but the default path must never be one of these.
+    Does not apply to the remote-server/droplet install path (different
+    disk entirely).
 - **MVP does not include** the full installer or cloud Vault — only
   Gateway up, BYO API key on first launch, pairing, and chat via WebClaw
   against the bundled OpenClaw. ("Pairing when needed" was the original
