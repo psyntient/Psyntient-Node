@@ -382,7 +382,9 @@ function InstallSection() {
               ? 'Open Psyntient Node without the browser bar.'
               : fallbackKind === 'safari'
                 ? 'Tap Share, then Add to Dock.'
-                : 'Bookmark this page (⌘/Ctrl+D) for quick access.'
+                : fallbackKind === 'opera'
+                  ? "Opera doesn't support app installation — bookmark this page (⌘/Ctrl+D) instead."
+                  : 'Bookmark this page (⌘/Ctrl+D) for quick access.'
         }
       >
         {isStandalone ? (

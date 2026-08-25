@@ -53,9 +53,19 @@ function isStandaloneNow(): boolean {
 // beforeinstallprompt; Safari and Firefox desktop never do, and need
 // manual "Add to Home Screen"/bookmark instructions instead. Detected
 // once at module load, not per-render.
-function detectFallbackKind(): 'safari' | 'firefox' | 'generic' {
+//
+// Opera gets its own bucket, not "generic": confirmed (Opera's own
+// forums, not assumed) that Opera deliberately disabled PWA install on
+// desktop despite being Chromium-based and supporting it on Android --
+// beforeinstallprompt will never fire there, no matter how correct the
+// manifest/service worker are. Without naming this explicitly, the
+// generic "bookmark this page" message reads as "install is broken"
+// rather than "this browser doesn't offer it" -- confirmed confusing in
+// practice, not hypothetical.
+function detectFallbackKind(): 'safari' | 'firefox' | 'opera' | 'generic' {
   if (typeof navigator === 'undefined') return 'generic'
   const ua = navigator.userAgent
+  if (/OPR\//.test(ua)) return 'opera'
   const isSafari = /^((?!chrome|android|crios|edgios|opr).)*safari/i.test(ua)
   if (isSafari) return 'safari'
   if (/firefox/i.test(ua)) return 'firefox'

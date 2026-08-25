@@ -35,7 +35,9 @@ export function InstallBanner() {
     ? 'Install Psyntient Node for quick access, without the browser bar.'
     : fallbackKind === 'safari'
       ? 'Add Psyntient Node to your Dock: tap Share, then Add to Dock.'
-      : 'Bookmark this page for quick access to your Node.'
+      : fallbackKind === 'opera'
+        ? "Opera doesn't support app installation — bookmark this page for quick access instead."
+        : 'Bookmark this page for quick access to your Node.'
 
   return (
     <div
