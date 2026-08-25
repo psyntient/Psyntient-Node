@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "short_name": "Noetic",
-  "name": "Noetic Interface",
+  "short_name": "Psyntient Node",
+  "name": "Psyntient Node",
   "description": "Chat with Cortex on your own Psyntient Node.",
   "icons": [
     {

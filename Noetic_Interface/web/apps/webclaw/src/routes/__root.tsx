@@ -52,7 +52,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'Noetic Interface',
+        title: 'Psyntient Node',
       },
       {
         name: 'description',
@@ -72,7 +72,7 @@ export const Route = createRootRoute({
       },
       {
         name: 'apple-mobile-web-app-title',
-        content: 'Noetic',
+        content: 'Psyntient Node',
       },
       {
         property: 'og:image',

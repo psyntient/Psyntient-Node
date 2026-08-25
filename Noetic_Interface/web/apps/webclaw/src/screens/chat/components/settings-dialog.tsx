@@ -430,7 +430,7 @@ export function SettingsDialog({
             <div>
               <DialogTitle className="mb-1">Settings</DialogTitle>
               <DialogDescription className="hidden">
-                Configure the Noetic Interface
+                Configure Psyntient Node
               </DialogDescription>
             </div>
             <DialogClose
@@ -507,7 +507,7 @@ export function SettingsDialog({
           <InstallSection />
 
           <SettingsSection title="About">
-            <div className="text-sm text-primary-800">Noetic Interface</div>
+            <div className="text-sm text-primary-800">Psyntient Node</div>
             <div className="flex gap-4 pt-2">
               <a
                 href="https://psyntient.io"
