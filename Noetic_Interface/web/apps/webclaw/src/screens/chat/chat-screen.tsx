@@ -21,6 +21,7 @@ import {
 import { chatUiQueryKey, getChatUiState, setChatUiState } from './chat-ui'
 import { ChatSidebar } from './components/chat-sidebar'
 import { ChatHeader } from './components/chat-header'
+import { InstallBanner } from './components/install-banner'
 import { ChatMessageList } from './components/chat-message-list'
 import { ChatComposer } from './components/chat-composer'
 import { GatewayStatusMessage } from './components/gateway-status-message'
@@ -671,6 +672,7 @@ export function ChatScreen({
             maxTokens={activeSession?.contextTokens}
             costUsd={activeSession?.estimatedCostUsd}
           />
+          <InstallBanner />
 
           {hideUi ? null : (
             <>
