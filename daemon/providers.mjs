@@ -73,17 +73,24 @@ export function isOpenRouterModelRef(modelRef) {
 }
 
 const OPENROUTER_STOCK_DEFAULTS = new Set([undefined, null, "", "openrouter/auto"]);
-// NOT "openrouter/google/gemini-flash-latest" -- that's OpenRouter's own
-// listing-only alias (shown with a "~" prefix in their /api/v1/models
-// catalog) and is NOT directly invokable via the completions API; a live
-// `openclaw infer model run --gateway` call against it returns
-// "FailoverError: The selected model was not found by the provider." This
-// is almost certainly the exact undiagnosed failure logged in
-// memory/2026-08-23.md ("Attempted switch to Gemini 2.5 Flash failed and
-// reverted to auto") -- someone tried an alias-style string instead of a
-// concrete, dated model id. Verified live: this concrete id resolves and
-// returns a real completion.
-const OPENROUTER_CHAT_DEFAULT = "openrouter/google/gemini-3.7-flash";
+// Was "openrouter/google/gemini-3.7-flash" -- switched 2026-08-25.
+// Real, measured problem: Gemini-via-OpenRouter never gets prompt-cache
+// breakpoints (OpenClaw's cache_control injection only fires for
+// anthropic/-prefixed models on the openrouter provider -- see
+// openclaw/openclaw#129005, filed with the live evidence: a one-word
+// reply on a ~20K-token system prompt showed cacheRead:0, cacheWrite:0,
+// runtimeMs:5050). Every message reprocessed the full system prompt from
+// scratch. anthropic/claude-3-haiku picks up the existing cache_control
+// path for free (no OpenClaw code change needed) and is the closest real
+// per-token cost match to Gemini 3.7 Flash of any Claude model on
+// OpenRouter -- verified live against OpenRouter's own pricing API:
+// claude-3-haiku is ~0.67x Gemini 3.7 Flash on both prompt and completion
+// pricing (consistently cheaper); the newer claude-haiku-4.5 is ~2.67x
+// *more* expensive, not a close match despite being the more obvious
+// "same tier" name. Known tradeoff, not free: claude-3-haiku is an older
+// model generation than Gemini 3.7 Flash or claude-haiku-4.5 -- picked
+// for cost-match + caching, not raw capability.
+const OPENROUTER_CHAT_DEFAULT = "openrouter/anthropic/claude-3-haiku";
 
 // Only applies the Flash default when model.primary is still the stock value
 // -- never overwrites a value the user (or a later Settings change)

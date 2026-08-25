@@ -129,12 +129,26 @@ just installed.
 
 ## Model Tiering (OpenRouter Nodes only)
 
-If this Node's provider is OpenRouter: ordinary chat defaults to a fast/cheap
-model (`openrouter/google/gemini-3.7-flash` — a concrete, dated model id, not
-the `-latest` alias, which turned out to be a listing-only alias that isn't
-directly invokable); the research-agent skill escalates to `openrouter/auto`
-per-invocation for actual analysis work. See `MEMORY.md`'s "Model Tiering"
-entry for the full reasoning and how the alias bug was diagnosed.
+If this Node's provider is OpenRouter: ordinary chat defaults to
+`openrouter/anthropic/claude-3-haiku` (changed 2026-08-25 from
+`openrouter/google/gemini-3.7-flash`) — the research-agent skill escalates
+to `openrouter/auto` per-invocation for actual analysis work. See
+`MEMORY.md`'s "Model Tiering" entry for the full reasoning.
+
+**Why Claude 3 Haiku, not Gemini Flash:** OpenClaw's prompt-cache injection
+(`cache_control` breakpoints) only fires for `anthropic/`-prefixed models on
+the OpenRouter provider — Gemini-via-OpenRouter never gets it, confirmed live
+(a one-word reply on this Node's ~20K-token system prompt showed
+`cacheRead:0, cacheWrite:0`, 5+ seconds runtime). Filed upstream:
+[openclaw/openclaw#129005](https://github.com/openclaw/openclaw/issues/129005).
+`claude-3-haiku` picks up the existing cache path for free, and is the
+closest real per-token cost match to Gemini 3.7 Flash of any Claude model on
+OpenRouter (~0.67x on both prompt/completion pricing, verified live against
+OpenRouter's pricing API — `claude-haiku-4.5` is ~2.67x more expensive
+despite sounding like the more obvious pick). Known tradeoff: Claude 3
+Haiku is an older model generation, chosen for cost-match + caching, not
+raw capability — revisit if quality issues show up in practice.
+
 Non-OpenRouter Nodes: this doesn't apply, the provider's own default model is
 used for everything.
 
