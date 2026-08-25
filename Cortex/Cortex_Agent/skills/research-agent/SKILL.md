@@ -1,0 +1,163 @@
+---
+name: research-agent
+description: "Deep research/analysis mode for Cortex — delegates to a heavier model and creates a Vault-backed project. Use only when the user explicitly asks for research, deep analysis, or a multi-session investigation, not for ordinary chat."
+---
+
+# Research Agent
+
+Deep-research and scientific-analysis mode. This is the local, buildable slice of
+what psyntient.io calls the "Research Agent" — see the "Not available yet" section
+below for what's deliberately left out and why.
+
+## When to use this
+
+**Explicit invocation only.** Triggers: "research X," "do a deep analysis of...,"
+"look into this properly," "start a project on...," "plan a study for..." Ordinary
+substantive questions are still just ordinary chat — this skill is for a distinct,
+multi-step investigation the user is knowingly starting, not every hard question.
+
+## Workflow
+
+All commands run from the Node root (`/Users/woodleybrown/Psyntient_Node`), **not**
+from `Cortex/Open-Claw/` — `working-memory.mjs` and `vault.mjs` resolve
+`Working_Memory/` and `Neural_Vault/` relative to that root.
+
+1. **Start the project.** If the project involves an actual recording/dataset
+   (not pure literature review or discussion), also capture its **modality**
+   — a loose tag, not a validated enum, e.g. `eeg`, `fmri`, `fnirs`, `meg`,
+   `ecog`, `bci`, `hrv`, `eda`, `eye-tracking`, `motion-capture`,
+   `self-report-only`, `mixed`, or whatever actually describes it. Ask the
+   user rather than guessing if it's not obvious from their request.
+   ```
+   node daemon/working-memory.mjs create-project <project-id> "<title>" [modality]
+   ```
+   This tag does two things: it lets you (and future analysis sub-agents)
+   pick the right methodology/tooling for this kind of data, and it's the
+   single source of truth that would later gate Archive-eligibility and
+   Observation Packet schema selection once Node API/Archive integration
+   ships (currently paused — see CAPABILITIES.md). Don't try to replicate
+   psyntient.io's exact Observation Packet schema here; this is deliberately
+   loose local metadata, not a validated upload format.
+
+   Use `node daemon/working-memory.mjs project-status <project-id>` any time you
+   need to check state rather than assuming.
+
+2. **Plan before analyzing.** Write `Working_Memory/cortex_projects/<project-id>/plan.md`
+   before doing open-ended analysis: the research question, which protocol applies
+   (below), and the planned analysis steps. This is a distinct step, not a formality
+   — skipping straight to analysis defeats the point of planning.
+
+3. **Find or define the research protocol.** "Analyzing Vault data using your own
+   research protocols" is the core of this skill. Check
+   `Cortex_Agent/research/protocols/` for an existing named methodology that fits
+   this project. If none exists or none matches:
+   - Ask the user to describe their preferred experimental methodology for this
+     kind of analysis — don't invent one on their behalf.
+   - Once they describe it, save it as a new file,
+     `research/protocols/<protocol-name>.md`, so it's reusable across future
+     projects without re-asking.
+   - Reference the protocol (by filename) in this project's `plan.md` and
+     `notes.md` so the applied methodology stays traceable later.
+
+4. **Analyze the user's actual Vault data.** Run `node daemon/vault.mjs status`
+   immediately to get the real path — **don't guess it via `ls`/`find`.** The Vault
+   root is `Neural_Vault/` at the Node root (`/Users/woodleybrown/Psyntient_Node/`),
+   a sibling of `Cortex/`, **not** nested under `Cortex/` — a live test of this
+   skill wasted several tool calls exploring `Cortex/Vault` and similar wrong
+   guesses before running the documented command. Once you have the real path,
+   read those files directly — there's no special read API, it's a real directory.
+   **If the Vault is empty or doesn't contain what the project needs, say so
+   plainly.** Do not fabricate findings or pretend data exists that doesn't.
+
+5. **Delegate the actual analysis work to a heavier model.** Don't do deep analysis
+   inline on the default (fast/cheap) chat model — spawn a sub-agent with an
+   explicit override:
+   ```
+   sessions_spawn({
+     prompt: "<research task>",
+     model: "openrouter/auto",
+     taskName: "research: <short label>"
+   })
+   ```
+   `openrouter/auto` (not a newly-pinned model) is the deliberate choice here — see
+   `Cortex_Agent/MEMORY.md`'s "Model Tiering" entry for why. **Check the tool
+   result's `resolvedModel` field afterward.** An invalid model string is skipped
+   *silently* into the default model with only a warning in the result — a
+   successful-looking spawn does not by itself prove the override took.
+
+6. **Write findings as you go.**
+   - `Working_Memory/cortex_projects/<project-id>/notes.md` — durable narrative:
+     what you found, what it means, open questions.
+   - `.../scratch/` — work product, exports, intermediate artifacts.
+   - `.../logs/` — session logs.
+   This is the exact field mapping `syncProjectToVault()` already codes for — don't
+   invent a different layout.
+
+   **Charts and other visual output**: if analysis produces a chart, plot,
+   or figure (matplotlib/plotly script, or any tool that writes an image
+   file), save it into `.../scratch/<filename>.png` (or `.svg`/`.jpg`/`.gif`/
+   `.webp`/`.pdf`), then reference it in your chat reply with a normal
+   markdown image tag:
+   ```
+   ![<description>](/api/artifact?project=<project-id>&file=<filename>.png)
+   ```
+   It renders inline in the Interface automatically — no extra step. This
+   only works for the exact filename saved in that project's `scratch/` (or,
+   after a sync, the Vault's `exports/`) — don't reference files elsewhere.
+   Generating the chart itself needs an actual plotting library (matplotlib,
+   plotly, etc., or MNE-Python for EEG-specific plots) available in the
+   Python environment you run scripts in — if that's missing, say so and
+   offer to help install it rather than silently failing or faking a result.
+
+   **Turning findings into a deliverable report**: write it as markdown in
+   `notes.md` (or a dedicated `report.md`) first, then convert with
+   `pandoc` — `pandoc report.md -o report.docx` for Word, or
+   `pandoc report.md --pdf-engine=typst -o report.pdf` for PDF. See
+   CAPABILITIES.md's "Documents" section for the full toolset (reading,
+   summarizing, editing, and creating documents) — it's more than just this.
+
+7. **Sync to the Vault at natural checkpoints.**
+   ```
+   node daemon/working-memory.mjs sync-project <project-id>
+   ```
+   This is what actually persists the work past a working-copy erase, to
+   `Neural_Vault/Devices/<hostname>/<project-id>/`.
+
+8. **Erase the working copy only after a successful sync.**
+   ```
+   node daemon/working-memory.mjs erase-project <project-id>
+   ```
+   The function already refuses if `lastSyncedAt` isn't stamped — a real safety
+   net, not just a courtesy. Don't work around it.
+
+## Scope note: `cortex_projects/`, never `chat_context/`
+
+`Working_Memory/chat_context/<thread_id>/` is a separate mechanism — a mirror of
+WebClaw chat transcripts, unrelated to research artifacts. This skill only ever
+reads/writes `cortex_projects/`. Don't conflate the two.
+
+## Not available yet
+
+This skill does **not** have access to the Noetic Archive, cannot cross-reference
+personal data against archived records, and cannot create or read "Observation
+Packets." Those are described on psyntient.io as part of the broader Psyntient
+ecosystem but are not implemented in this Node — the Archive backend is a separate,
+currently-paused effort on infrastructure outside this repo. There is also no
+subscription-tier or entitlement gating locally; this skill is available to any
+user of this Node once installed, regardless of what the marketing site's
+"activates based on subscription tier" language implies.
+
+If a user asks for archive cross-referencing or Observation Packet workflows, say
+so plainly rather than attempting to simulate them — research projects are still
+fully usable for local analysis of whatever Vault data the user actually has.
+The `modality` tag from step 1 is groundwork for this, not a workaround —
+today it only helps local analysis; it isn't a real Observation Packet and
+nothing currently reads it for Archive purposes.
+
+## Primary domain, general-purpose tool
+
+This skill's primary edict is consciousness / neurophenomenological research
+— that's what the modality list above is drawn from, and what to assume when
+a request is ambiguous. But the mechanism itself (plan → protocol → analyze →
+write up → sync) is general-purpose: use it for any kind of research the user
+asks for, not just neuro/consciousness work.

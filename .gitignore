@@ -2,16 +2,36 @@
 node_modules/
 *.log
 .psyntient/
+.git.bak/
 
-# Independently-versioned components — each is its own git clone with its
-# own remote/history. Cortex/versions.json tracks which ref is installed.
+# Claude Code session-handoff / tooling files — dev-process notes for
+# continuing work in this coding tool, not part of the shipped app.
+NEXT_SESSION.md
+.claude/
+
+# OpenClaw is the one component NOT vendored here — a huge, independently
+# fast-moving upstream (~5GB checkout). Pulled fresh from real upstream
+# per Cortex/versions.json's pin; never stored in this repo. Cortex_Agent
+# and Noetic_Interface/web ARE tracked here now (this repo is both the
+# full-app backup and the update source) — see NEXT_SESSION.md-equivalent
+# reasoning in the 2026-08-24 session: neither has meaningful content to
+# lose by folding into this repo (neither had its own remote), and their
+# actual source is what "a fully functional app" needs.
 Cortex/Open-Claw/
-Cortex/Cortex_Agent/
-Noetic_Interface/web/
 
-# Runtime/private data — not part of the versioned skeleton
-Neural_Vault/local/*
-!Neural_Vault/local/.gitkeep
+# Accumulated session/memory state (Cortex_Agent) — dev-machine-specific
+# history, not needed to reconstruct a working app. AGENTS.md's own
+# first-run bootstrap flow creates these fresh; nothing here is a
+# required template.
+Cortex/Cortex_Agent/MEMORY.md
+Cortex/Cortex_Agent/memory/
+
+# Runtime/private data — not part of the versioned app. Both directories
+# are fully self-constructing (daemon/vault.mjs's activateLocal() and
+# daemon/working-memory.mjs's ensureScaffold(), both idempotent, both
+# called unconditionally on every launch) — nothing here is required
+# content, not even as a template.
+Neural_Vault/local/
 Working_Memory/*
 !Working_Memory/.gitkeep
 logs/*

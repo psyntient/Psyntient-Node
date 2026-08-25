@@ -1,0 +1,245 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Work+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+@source "../../../node_modules/streamdown/dist/*.js";
+
+.root {
+  isolation: isolate;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Psyntient "Ink & Gold" brand (branding package v1.0). The Node ships
+ * dark-only, so the same ink/cream ramp is used for the base @theme, .dark,
+ * and the .system dark-media block below — there is no light variant left
+ * to fall back to, which also kills the white-flash-on-cold-start anti-
+ * pattern the branding checklist calls out. Ordinal positions (50 = darkest/
+ * background, 950 = lightest/text) are preserved from upstream so existing
+ * component usage (bg-primary-100, text-primary-900, etc.) keeps making
+ * visual sense; only the hue/chroma changed, from true gray to warm ink and
+ * cream, per the package's explicit rule: "muted text is warm cream at
+ * lower opacity, not gray — gray reads as dead SaaS."
+ */
+@theme {
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-surface: var(--color-ink-950);
+  --color-ink: var(--color-cream);
+
+  --color-primary-50: oklch(0.16 0.04 285); /* background #0C0A1D */
+  --color-primary-100: oklch(0.20 0.05 285); /* card/popover #14122B */
+  --color-primary-200: oklch(0.22 0.05 285); /* secondary/muted fill #191731 */
+  --color-primary-300: oklch(0.24 0.06 300); /* accent hover surface #241737 */
+  --color-primary-400: oklch(0.32 0.05 285); /* border/input #302F4B */
+  --color-primary-500: oklch(0.61 0.02 285); /* muted text, bumped from 0.55: WCAG AA needs 4.5:1 for normal text, 0.55 only hit 4.00:1 */
+  --color-primary-600: oklch(0.70 0.025 85);
+  --color-primary-700: oklch(0.80 0.03 82);
+  --color-primary-800: oklch(0.88 0.035 82); /* muted-foreground #E3D6BE */
+  --color-primary-900: oklch(0.94 0.025 82);
+  --color-primary-950: oklch(0.97 0.025 82); /* foreground #FEF4E3 */
+
+  --color-gold-light: oklch(0.85 0.10 88); /* #F7DC9A hover/light text */
+  --color-gold: oklch(0.82 0.14 85); /* #EEBC4A primary accent */
+  --color-gold-deep: oklch(0.72 0.16 70); /* #E38F00 gradient partner */
+  --color-gold-pressed: oklch(0.76 0.13 78); /* #D9A233 pressed */
+  --color-cream: oklch(0.974 0.018 80); /* #FDF5E9 */
+  --color-destructive: oklch(0.577 0.245 27.325); /* #E5484D */
+
+  --font-sans: 'Work Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.dark,
+.system {
+  color-scheme: dark;
+  --color-primary-50: oklch(0.16 0.04 285);
+  --color-primary-100: oklch(0.20 0.05 285);
+  --color-primary-200: oklch(0.22 0.05 285);
+  --color-primary-300: oklch(0.24 0.06 300);
+  --color-primary-400: oklch(0.32 0.05 285);
+  --color-primary-500: oklch(0.61 0.02 285);
+  --color-primary-600: oklch(0.70 0.025 85);
+  --color-primary-700: oklch(0.80 0.03 82);
+  --color-primary-800: oklch(0.88 0.035 82);
+  --color-primary-900: oklch(0.94 0.025 82);
+  --color-primary-950: oklch(0.97 0.025 82);
+
+  --color-surface: oklch(0.16 0.04 285);
+  --color-ink: oklch(0.974 0.018 80);
+}
+
+.light {
+  color-scheme: dark;
+}
+
+html,
+body {
+  @apply m-0 font-sans;
+  letter-spacing: -0.15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+.font-sans {
+  letter-spacing: -0.15px;
+}
+
+.inline-code {
+  background: var(--color-primary-100);
+  border: 1px solid var(--color-primary-200);
+  border-radius: 0.5rem;
+  color: var(--color-primary-900);
+  font-family:
+    'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.95em;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
+.code-block {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.code-block pre,
+.code-block .shiki {
+  background: transparent !important;
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.code-block pre code,
+.code-block .shiki code {
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  min-width: 0;
+  max-width: 100%;
+  width: 0;
+}
+
+code {
+  font-family:
+    'IBM Plex Mono', Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 50%;
+  }
+  100% {
+    background-position: -200% 50%;
+  }
+}
+
+/* Psyntient Ink & Gold v1.0 motion system (BRANDING.md section 7) --
+   "logo halo, live dot": scale 1->1.18, opacity .35->.7, 7s ease-in-out
+   infinite. Ambient, dim, never competes with text. */
+@keyframes psy-aura {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.7;
+  }
+}
+
+/* BRANDING.md section 7's "psy-morph" (originally scoped to "psychedelic
+   logo only") -- reused here for the onboarding wizard's progress bar at
+   the user's explicit request. Continuous hue-rotate over a gradient
+   rather than a brightness/opacity strobe -- vivid color-cycling reads as
+   "psychedelic" without the flash-rate accessibility risk of literal
+   strobing. 4s, faster than the logo's original 14s -- a progress
+   indicator should feel livelier than an ambient background element. */
+@keyframes psy-morph {
+  /* 1deg, not 0deg: the build's CSS minifier strips a literal 0deg
+     angle argument down to `hue-rotate()` with no argument at all,
+     which is invalid per the CSS filter spec (confirmed by grepping
+     the actual built output) -- 1deg is imperceptibly different from a
+     true 0-360 loop and survives minification as valid CSS. */
+  0% {
+    filter: hue-rotate(1deg);
+  }
+  100% {
+    filter: hue-rotate(361deg);
+  }
+}
+
+/* Streaming response affordances: border pulse + light sweep on the
+   bubble currently receiving tokens (mirrors OpenClaw's own dashboard
+   chatStreamPulse), plus a throttled fade/slide-up "unfold" retrigger
+   on the bubble's content as new chunks arrive (see streaming-bubble.tsx
+   for the retrigger logic -- this only defines the animation itself). */
+@keyframes psy-stream-pulse {
+  0%,
+  100% {
+    border-color: var(--color-primary-300);
+  }
+  50% {
+    border-color: var(--color-gold);
+  }
+}
+
+@keyframes psy-stream-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes psy-stream-unfold {
+  from {
+    opacity: 0.4;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.psy-stream-bubble {
+  position: relative;
+  overflow: hidden;
+  animation: psy-stream-pulse 1.6s ease-in-out infinite;
+}
+
+.psy-stream-bubble::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    oklch(0.82 0.14 85 / 0.16) 50%,
+    transparent 70%
+  );
+  animation: psy-stream-sweep 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.psy-unfold {
+  animation: psy-stream-unfold 260ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
