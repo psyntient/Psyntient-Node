@@ -135,19 +135,28 @@ If this Node's provider is OpenRouter: ordinary chat defaults to
 to `openrouter/auto` per-invocation for actual analysis work. See
 `MEMORY.md`'s "Model Tiering" entry for the full reasoning.
 
-**Why Claude 3 Haiku, not Gemini Flash:** OpenClaw's prompt-cache injection
-(`cache_control` breakpoints) only fires for `anthropic/`-prefixed models on
-the OpenRouter provider — Gemini-via-OpenRouter never gets it, confirmed live
-(a one-word reply on this Node's ~20K-token system prompt showed
-`cacheRead:0, cacheWrite:0`, 5+ seconds runtime). Filed upstream:
-[openclaw/openclaw#129005](https://github.com/openclaw/openclaw/issues/129005).
-`claude-3-haiku` picks up the existing cache path for free, and is the
+**Why Claude 3 Haiku, not Gemini Flash:** every message reprocesses the full
+system prompt from scratch, no prompt-cache reuse — confirmed live (a
+one-word reply on this Node's ~20K-token system prompt showed
+`cacheRead:0, cacheWrite:0`, 5+ seconds runtime). `claude-3-haiku` is the
 closest real per-token cost match to Gemini 3.7 Flash of any Claude model on
 OpenRouter (~0.67x on both prompt/completion pricing, verified live against
 OpenRouter's pricing API — `claude-haiku-4.5` is ~2.67x more expensive
-despite sounding like the more obvious pick). Known tradeoff: Claude 3
-Haiku is an older model generation, chosen for cost-match + caching, not
-raw capability — revisit if quality issues show up in practice.
+despite sounding like the more obvious pick).
+
+**This switch is a cost reduction, not a caching fix.** Initially assumed
+Claude-via-OpenRouter already gets `cache_control` support "for free" (a
+compat-matrix rule exists for it) — but a live two-message-same-session test
+with `claude-3-haiku` showed zero cache activity too. Turned out OpenClaw
+had this genuinely working before (fixed Feb 2026 in
+[openclaw/openclaw#17473](https://github.com/openclaw/openclaw/pull/17473))
+and it's since regressed — the wiring still looks present in current source
+but empirically doesn't fire. Tracked upstream:
+[openclaw/openclaw#129005](https://github.com/openclaw/openclaw/issues/129005)
+(retitled after the regression was found). Known tradeoff: Claude 3 Haiku
+is an older model generation, chosen for cost-match, not raw capability —
+revisit if quality issues show up in practice, and re-check caching once
+the upstream regression is fixed.
 
 Non-OpenRouter Nodes: this doesn't apply, the provider's own default model is
 used for everything.

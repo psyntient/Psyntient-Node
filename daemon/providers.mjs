@@ -74,22 +74,32 @@ export function isOpenRouterModelRef(modelRef) {
 
 const OPENROUTER_STOCK_DEFAULTS = new Set([undefined, null, "", "openrouter/auto"]);
 // Was "openrouter/google/gemini-3.7-flash" -- switched 2026-08-25.
-// Real, measured problem: Gemini-via-OpenRouter never gets prompt-cache
-// breakpoints (OpenClaw's cache_control injection only fires for
-// anthropic/-prefixed models on the openrouter provider -- see
-// openclaw/openclaw#129005, filed with the live evidence: a one-word
-// reply on a ~20K-token system prompt showed cacheRead:0, cacheWrite:0,
-// runtimeMs:5050). Every message reprocessed the full system prompt from
-// scratch. anthropic/claude-3-haiku picks up the existing cache_control
-// path for free (no OpenClaw code change needed) and is the closest real
-// per-token cost match to Gemini 3.7 Flash of any Claude model on
-// OpenRouter -- verified live against OpenRouter's own pricing API:
-// claude-3-haiku is ~0.67x Gemini 3.7 Flash on both prompt and completion
-// pricing (consistently cheaper); the newer claude-haiku-4.5 is ~2.67x
-// *more* expensive, not a close match despite being the more obvious
-// "same tier" name. Known tradeoff, not free: claude-3-haiku is an older
-// model generation than Gemini 3.7 Flash or claude-haiku-4.5 -- picked
-// for cost-match + caching, not raw capability.
+// Real, measured problem: every message reprocesses the full system
+// prompt from scratch, no prompt-cache reuse at all (a one-word reply on
+// a ~20-28K-token system prompt showed cacheRead:0, cacheWrite:0 either
+// way). anthropic/claude-3-haiku is the closest real per-token cost
+// match to Gemini 3.7 Flash of any Claude model on OpenRouter --
+// verified live against OpenRouter's own pricing API: ~0.67x Gemini 3.7
+// Flash on both prompt and completion pricing (consistently cheaper);
+// the newer claude-haiku-4.5 is ~2.67x *more* expensive, not a close
+// match despite being the more obvious "same tier" name.
+//
+// IMPORTANT, corrected 2026-08-25: this switch does NOT fix the caching
+// problem. Initially assumed Claude-via-OpenRouter already gets
+// cache_control support (OpenClaw's compat matrix has a rule for it),
+// but a live two-message-same-session test with claude-3-haiku showed
+// zero cache activity too. Deeper investigation found OpenClaw HAD this
+// working (openclaw/openclaw#9600, fixed via #17473 in Feb 2026) and it
+// has since regressed -- the wiring still looks present in current
+// source but empirically doesn't fire. See
+// openclaw/openclaw#129005 (retitled to reflect the regression finding)
+// for the full trail. So: this switch is a real cost reduction
+// (~0.67x), not a caching/latency fix -- that needs an upstream fix to
+// the regression, tracked in the issue above.
+//
+// Known tradeoff, not free: claude-3-haiku is an older model generation
+// than Gemini 3.7 Flash or claude-haiku-4.5 -- picked for cost-match,
+// not raw capability.
 const OPENROUTER_CHAT_DEFAULT = "openrouter/anthropic/claude-3-haiku";
 
 // Only applies the Flash default when model.primary is still the stock value
