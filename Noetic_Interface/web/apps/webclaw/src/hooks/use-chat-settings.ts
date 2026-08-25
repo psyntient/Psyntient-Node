@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
-export type ThinkingLevel = 'low' | 'medium' | 'high'
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
 export type ChatSettings = {
   showToolMessages: boolean
@@ -23,7 +23,7 @@ export const useChatSettingsStore = create<ChatSettingsState>()(
       settings: {
         showToolMessages: true,
         showReasoningBlocks: true,
-        thinkingLevel: 'medium',
+        thinkingLevel: 'off',
         theme: 'dark',
       },
       updateSettings: (updates) =>
@@ -33,6 +33,24 @@ export const useChatSettingsStore = create<ChatSettingsState>()(
     }),
     {
       name: 'chat-settings',
+      // v1: this Node's default chat model (claude-3-haiku) has no thinking
+      // support at all, so the old 'medium' default broke every message
+      // ("Thinking level \"medium\" is not supported ... Use one of: off.").
+      // One-time correction for anyone with the old default already
+      // persisted; a deliberate later choice (including switching back to
+      // low/medium/high for a model that supports it) is untouched after
+      // this runs once.
+      version: 1,
+      migrate: (persistedState) => {
+        const state = persistedState as ChatSettingsState
+        if (state?.settings?.thinkingLevel && state.settings.thinkingLevel !== 'off') {
+          return {
+            ...state,
+            settings: { ...state.settings, thinkingLevel: 'off' },
+          }
+        }
+        return state
+      },
     },
   ),
 )
