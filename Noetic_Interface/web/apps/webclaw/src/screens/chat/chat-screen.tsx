@@ -41,7 +41,6 @@ import { useChatMobile } from './hooks/use-chat-mobile'
 import { useChatSessions } from './hooks/use-chat-sessions'
 import { useChatStream } from './hooks/use-chat-stream'
 import { useChatPendingSend } from './hooks/use-chat-pending-send'
-import { useChatGenerationGuard } from './hooks/use-chat-generation-guard'
 import { shouldRedirectToConnect } from './hooks/use-chat-error-state'
 import { useChatRedirect } from './hooks/use-chat-redirect'
 import type { AttachmentFile } from '@/components/attachment-button'
@@ -168,6 +167,26 @@ export function ChatScreen({
   const refreshHistory = useCallback(() => {
     void historyQuery.refetch()
   }, [historyQuery])
+
+  // Explicit, first-party belt-and-suspenders: react-query's own default
+  // refetchOnWindowFocus (query-core's focusManager, itself a
+  // visibilitychange listener) already covers "switch tabs away and back
+  // refetches history," which is why that workaround has appeared to fix a
+  // stuck reply in the past. But that's an implicit dependency-default
+  // behavior nobody documented here -- someone could disable it globally
+  // later without realizing it was load-bearing for this bug. Wiring our
+  // own listener makes the recovery path explicit and independent of that
+  // default ever changing.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        refreshHistory()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () =>
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [refreshHistory])
 
   // Mirrors this thread's transcript into
   // Working_Memory/chat_context/<friendlyId>/ (Phase I). Best-effort — the
@@ -325,6 +344,8 @@ export function ChatScreen({
       content: a.base64,
     }))
 
+    const idempotencyKey = randomUUID()
+
     fetch('/api/send', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -333,7 +354,7 @@ export function ChatScreen({
         friendlyId,
         message: body,
         thinking: settings.thinkingLevel,
-        idempotencyKey: randomUUID(),
+        idempotencyKey,
         attachments: attachmentsPayload,
       }),
     })
@@ -342,12 +363,18 @@ export function ChatScreen({
         const payload = (await res.json().catch(() => ({}))) as {
           runId?: string
         }
-        if (
-          typeof payload.runId === 'string' &&
-          payload.runId.trim().length > 0
-        ) {
-          startRun(payload.runId.trim())
-        }
+        // Always arm the safety net, even if the server response is missing
+        // a runId (unexpected shape, edge-case error path, etc.) -- falling
+        // back to the idempotencyKey we already generated. Previously this
+        // only armed when payload.runId was present, so that gap left
+        // waitingForResponse=true with no per-run timer at all and no
+        // rescue -- a real user report of a reply never appearing traced
+        // back to exactly this.
+        const runId =
+          typeof payload.runId === 'string' && payload.runId.trim().length > 0
+            ? payload.runId.trim()
+            : idempotencyKey
+        startRun(runId)
         refreshHistory()
       })
       .catch((err) => {
@@ -599,12 +626,6 @@ export function ChatScreen({
     sessionKeyForHistory,
     queryClient,
     setIsRedirecting,
-  })
-
-  useChatGenerationGuard({
-    waitingForResponse,
-    refreshHistory,
-    setWaitingForResponse,
   })
 
   useChatPendingSend({

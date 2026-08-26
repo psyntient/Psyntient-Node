@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 
 import { getMessageTimestamp, textFromMessage } from '../utils'
-import {
-  chatQueryKeys,
-  updateHistoryMessages,
-  updateSessionLastMessage,
-} from '../chat-queries'
+import { updateHistoryMessages, updateSessionLastMessage } from '../chat-queries'
 import type { QueryClient } from '@tanstack/react-query'
 import type { GatewayMessage, MessageContent } from '../types'
 
@@ -96,17 +92,23 @@ export function useChatStream({
             stateVersion?: unknown
           }
           if (parsed.event === 'chat.history') {
-            const payload = parsed.payload as { messages?: Array<unknown> } | null
-            if (payload && Array.isArray(payload.messages)) {
-              queryClient.setQueryData(
-                chatQueryKeys.history(activeFriendlyId, sessionKeyForHistory),
-                {
-                  sessionKey: sessionKeyForHistory,
-                  messages: payload.messages,
-                },
-              )
-              return
-            }
+            // Route through the same canonical REST refetch every other
+            // recovery path uses (stream open, run final/error/aborted, the
+            // visibilitychange listener), rather than trusting this event's
+            // own embedded snapshot as a second, independent source of
+            // truth. That embedded snapshot is captured server-side at
+            // some earlier moment and can arrive after the client has
+            // already applied newer deltas (a real race given the
+            // documented EventSource-reconnects-on-every-session-load
+            // behavior) -- directly clobbering the cache with it could
+            // revert to a state missing the latest turn, which then made
+            // the delta-merge fallback heuristic below (time/text
+            // similarity, for when no __streamRunId tag exists yet)
+            // misattribute the *next* run's content onto the *previous*
+            // run's message. Confirmed via a real duplicate-message report
+            // where the server's own /api/history was already fully
+            // correct -- the corruption was client-cache-only.
+            refreshHistoryRef.current()
             return
           }
           if (!parsed.event) return
