@@ -73,64 +73,32 @@ export function isOpenRouterModelRef(modelRef) {
 }
 
 const OPENROUTER_STOCK_DEFAULTS = new Set([undefined, null, "", "openrouter/auto"]);
-// Was "openrouter/google/gemini-3.7-flash" -- switched 2026-08-25.
-// Real, measured problem: every message reprocesses the full system
-// prompt from scratch, no prompt-cache reuse at all (a one-word reply on
-// a ~20-28K-token system prompt showed cacheRead:0, cacheWrite:0 either
-// way). anthropic/claude-3-haiku is the closest real per-token cost
-// match to Gemini 3.7 Flash of any Claude model on OpenRouter --
-// verified live against OpenRouter's own pricing API: ~0.67x Gemini 3.7
-// Flash on both prompt and completion pricing (consistently cheaper);
-// the newer claude-haiku-4.5 is ~2.67x *more* expensive, not a close
-// match despite being the more obvious "same tier" name.
-//
-// IMPORTANT, corrected 2026-08-25: this switch does NOT fix the caching
-// problem. Initially assumed Claude-via-OpenRouter already gets
-// cache_control support (OpenClaw's compat matrix has a rule for it),
-// but a live two-message-same-session test with claude-3-haiku showed
-// zero cache activity too. Deeper investigation found OpenClaw HAD this
-// working (openclaw/openclaw#9600, fixed via #17473 in Feb 2026) and it
-// has since regressed -- the wiring still looks present in current
-// source but empirically doesn't fire. See
-// openclaw/openclaw#129005 (retitled to reflect the regression finding)
-// for the full trail. So: this switch is a real cost reduction
-// (~0.67x), not a caching/latency fix -- that needs an upstream fix to
-// the regression, tracked in the issue above.
-//
-// Known tradeoff, not free: claude-3-haiku is an older model generation
-// than Gemini 3.7 Flash or claude-haiku-4.5 -- picked for cost-match,
-// not raw capability.
-const OPENROUTER_CHAT_DEFAULT = "openrouter/anthropic/claude-3-haiku";
+// History, in order, all 2026-08-25:
+// 1. Switched from "openrouter/google/gemini-3.7-flash" to
+//    "openrouter/anthropic/claude-3-haiku" for cost: Gemini requests showed
+//    zero prompt-cache reuse (cacheRead:0, cacheWrite:0 on a ~20-28K-token
+//    system prompt every message), and claude-3-haiku was the closest
+//    per-token cost match to Gemini of any Claude model (~0.67x, verified
+//    against OpenRouter's pricing API) -- confirmed separately that this
+//    did NOT fix the caching problem either (OpenRouter+Anthropic caching
+//    is a real upstream regression, tracked in openclaw/openclaw#129005),
+//    so it was a pure cost play, not a latency fix.
+// 2. That swap broke chat outright: claude-3-haiku has no extended-thinking
+//    support at all, and OpenClaw's thinking-level resolver defaults to
+//    "low" for any anthropic/* model regardless -- fixed live by forcing
+//    thinking "off" for that specific model key.
+// 3. Reverted back to Gemini 3.7 Flash after real evidence the cost
+//    optimization was costing correctness: this workspace's system prompt
+//    is large and fully uncached on every turn regardless of model, and
+//    handing that whole prompt to an older/weaker model on every turn
+//    measurably increased spurious tool-call behavior (e.g. invoking a
+//    tool for a plain poem request) -- caught live in a real transcript,
+//    same day, right after the switch. A cost optimization isn't worth
+//    trading away basic instruction-following.
+const OPENROUTER_CHAT_DEFAULT = "openrouter/google/gemini-3.7-flash";
 
-// claude-3-haiku has no extended-thinking support at all -- unlike newer
-// Claude models, it errors on every non-"off" thinking level ("Thinking
-// level \"low\" is not supported for openrouter/anthropic/claude-3-haiku.
-// Use one of: off."), and OpenClaw's own default-thinking-level resolver
-// doesn't know that and picks "low" for any anthropic/* model family.
-// Discovered live 2026-08-25: chat was fully broken (every message threw)
-// until this was set. Keyed here (not a blanket agents.defaults.thinkingDefault)
-// so it only touches this specific model and doesn't affect a future default
-// model swap that *does* support thinking.
-async function ensureThinkingOffForChatDefault() {
-  const models = (await jsonCommand(["config", "get", "agents.defaults.models"], { timeoutMs: 30000 })) || {};
-  if (models[OPENROUTER_CHAT_DEFAULT]?.params?.thinking === "off") return;
-  const merged = { ...models, [OPENROUTER_CHAT_DEFAULT]: { params: { thinking: "off" } } };
-  // Dotted-path `config set agents.defaults.models."a/b/c".params.thinking off`
-  // does NOT work here -- verified live that the quoted-segment syntax gets
-  // written as a literal key including the quote characters
-  // (`"openrouter/anthropic/claude-3-haiku"` as the actual object key), which
-  // silently fails to match at lookup time. Replace the whole map instead.
-  const result = await runCli(
-    ["config", "set", "agents.defaults.models", JSON.stringify(merged), "--replace", "--strict-json"],
-    { timeoutMs: 30000 },
-  );
-  if (result.code !== 0) {
-    throw new Error(`Failed to set thinking override for ${OPENROUTER_CHAT_DEFAULT}: ${result.stderr || result.stdout}`);
-  }
-}
-
-// Only applies the Flash default when model.primary is still the stock value
-// -- never overwrites a value the user (or a later Settings change)
+// Only applies this default when model.primary is still the stock value --
+// never overwrites a value the user (or a later Settings change)
 // deliberately set, including a deliberate switch back to "openrouter/auto".
 // Verified live: `openclaw config get <path> --json` returns the raw value
 // directly (e.g. "openrouter/auto"), NOT wrapped in an object -- compare
@@ -147,7 +115,6 @@ export async function applyOpenRouterChatDefault() {
   if (result.code !== 0) {
     throw new Error(`Failed to set OpenRouter chat default: ${result.stderr || result.stdout}`);
   }
-  await ensureThinkingOffForChatDefault();
   return { changed: true, model: OPENROUTER_CHAT_DEFAULT };
 }
 
