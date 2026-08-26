@@ -130,10 +130,22 @@ export function ChatScreen({
   const gatewayStatusQuery = useQuery({
     queryKey: ['gateway', 'status'],
     queryFn: fetchGatewayStatus,
-    retry: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    // Self-healing: fetchGatewayStatus aborts at 2.5s, so any transient blip
+    // (a gateway restart, a slow first probe) used to latch "OpenClaw gateway
+    // is unreachable" permanently -- retry:false plus no refetch on focus or
+    // reconnect meant nothing ever re-checked, and even the visible "Retry"
+    // button did not clear it. Reproduced live: /api/ping returned {"ok":true}
+    // and 18 sessions listed while the UI still showed the error banner.
+    // One retry absorbs the common single-blip case; focus/reconnect refetch
+    // recovers when the user returns to the tab or the network comes back;
+    // the error-only 10s poll heals an unattended tab without adding any
+    // steady-state polling once the gateway is healthy again.
+    retry: 1,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     refetchOnMount: 'always',
+    refetchInterval: (query) =>
+      query.state.error || query.state.data?.ok === false ? 10000 : false,
   })
   const gatewayStatusMountRef = useRef(Date.now())
   const gatewayStatusError =
