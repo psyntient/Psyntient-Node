@@ -63,14 +63,36 @@ export const Route = createFileRoute('/api/sessions')({
     handlers: {
       GET: async () => {
         try {
-          const payload = await gatewayRpc<SessionsListGatewayResponse>(
-            'sessions.list',
-            {
-              limit: 50,
-              includeLastMessage: true,
-              includeDerivedTitles: true,
-            },
-          )
+          // Same retryable-rebuild condition documented in api/history.ts:
+          // the Gateway answers sessions.list with
+          // SessionTranscriptProjectionUnavailableError ("projection is
+          // rebuilding") while it reprojects, and failing the request drops
+          // the whole chat list in the sidebar.
+          let payload: SessionsListGatewayResponse | null = null
+          let lastErr: unknown = null
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            try {
+              payload = await gatewayRpc<SessionsListGatewayResponse>(
+                'sessions.list',
+                {
+                  limit: 50,
+                  includeLastMessage: true,
+                  includeDerivedTitles: true,
+                },
+              )
+              break
+            } catch (err) {
+              lastErr = err
+              const message = err instanceof Error ? err.message : String(err)
+              const retryable =
+                /rebuild|UNAVAILABLE|retry shortly|projection/i.test(message)
+              if (!retryable || attempt === 3) throw err
+              await new Promise((resolve) =>
+                setTimeout(resolve, 150 * (attempt + 1)),
+              )
+            }
+          }
+          if (!payload) throw lastErr ?? new Error('sessions.list failed')
 
           return json(normalizeSessions(payload))
         } catch (err) {
