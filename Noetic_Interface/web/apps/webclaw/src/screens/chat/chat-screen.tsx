@@ -696,7 +696,7 @@ export function ChatScreen({
                       sparkle={false}
                       frameSize={128}
                       alt=""
-                      className="h-24 w-24 rounded-full animate-[psy-aura_7s_ease-in-out_infinite]"
+                      className="h-24 w-24 rounded-full"
                     />
                     <p className="font-serif text-xl text-primary-950">
                       What are we exploring today?

@@ -262,10 +262,11 @@ function MessageItemComponent({
     : null
 
   const assistantParts = Array.isArray(message.content) ? message.content : []
-  // "Researching" is a distinct, more vivid avatar state (psy-morph) versus
-  // the plain active pulse -- detected via the exact tool name the
-  // research-agent skill calls for model escalation (see
-  // Cortex_Agent/skills/research-agent/SKILL.md's sessions_spawn usage).
+  // "Researching" suppresses the talk-cycle/sparkles on the avatar (a
+  // model-escalation tool call, not token-by-token speech) -- detected via
+  // the exact tool name the research-agent skill calls for model
+  // escalation (see Cortex_Agent/skills/research-agent/SKILL.md's
+  // sessions_spawn usage).
   const isResearching =
     isStreaming &&
     assistantParts.some(
@@ -356,24 +357,17 @@ function MessageItemComponent({
 
       {isAssistant && (
         <div className="flex w-full items-start gap-3">
-          <div
-            className={cn(
-              'mt-1 size-10 shrink-0 rounded-full',
-              // The plain streaming pulse ring was dropped once the
-              // speaking-sparkles existed -- both signaled "actively
-              // replying" at once, which read as cluttered. Research mode
-              // keeps its own gold ring since it's a distinct, rarer state
-              // the sparkles alone don't communicate.
-              isResearching && 'border-2 border-gold animate-[psy-morph_4s_linear_infinite]',
-            )}
-          >
+          <div className="mt-1 size-10 shrink-0 rounded-full">
+            {/* The elf is a brand mascot -- it stays fully solid/opaque at
+                all times. No ring/pulse/fade treatment: the gold research
+                ring and the idle psy-aura breathing fade both read as the
+                avatar going faint or flashing distractingly, per direct
+                user feedback. Speaking sparkles (inside ElfAvatar) are the
+                only "something is happening" affordance now. */}
             <ElfAvatar
               speaking={isStreaming && !isResearching}
               frameSize={40}
-              className={cn(
-                'h-full w-full rounded-full',
-                !isStreaming && 'animate-[psy-aura_7s_ease-in-out_infinite]',
-              )}
+              className="h-full w-full rounded-full"
             />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
