@@ -233,6 +233,24 @@ code {
   animation: psy-stream-unfold 260ms ease-out;
 }
 
+/* ElfAvatar's "speaking" sparkles (components/elf-avatar.tsx) -- small gold
+   motes twinkling near the portrait while Cortex is actively streaming a
+   reply. Each sparkle already carries its own animation-delay/duration
+   inline for a staggered, non-mechanical feel; this keyframe just defines
+   the twinkle shape itself. Component only mounts these while speaking, so
+   there's no idle-state cost. */
+@keyframes psy-sparkle-twinkle {
+  0%,
+  100% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

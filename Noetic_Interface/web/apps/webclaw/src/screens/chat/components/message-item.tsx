@@ -11,7 +11,8 @@ import type {
   ToolCallContent,
 } from '../types'
 import type { ToolPart } from '@/components/prompt-kit/tool'
-import { Message, MessageAvatar, MessageContent } from '@/components/prompt-kit/message'
+import { Message, MessageContent } from '@/components/prompt-kit/message'
+import { ElfAvatar } from '@/components/elf-avatar'
 import { StreamingBubble } from '@/components/prompt-kit/streaming-bubble'
 import { Thinking } from '@/components/prompt-kit/thinking'
 import { Tool } from '@/components/prompt-kit/tool'
@@ -364,9 +365,9 @@ function MessageItemComponent({
                   : 'border-2 animate-[psy-stream-pulse_1.6s_ease-in-out_infinite]'),
             )}
           >
-            <MessageAvatar
-              src="/brand/noetic-elf-avatar-64.png"
-              alt="Cortex"
+            <ElfAvatar
+              speaking={isStreaming && !isResearching}
+              frameSize={64}
               className={cn(
                 'h-full w-full rounded-full',
                 !isStreaming && 'animate-[psy-aura_7s_ease-in-out_infinite]',

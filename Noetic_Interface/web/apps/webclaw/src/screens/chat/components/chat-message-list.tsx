@@ -8,6 +8,7 @@ import {
   ChatContainerScrollAnchor,
 } from '@/components/prompt-kit/chat-container'
 import { TypingIndicator } from '@/components/prompt-kit/typing-indicator'
+import { ElfAvatar } from '@/components/elf-avatar'
 import { useChatSettings } from '@/hooks/use-chat-settings'
 
 type ChatMessageListProps = {
@@ -208,22 +209,25 @@ function ChatMessageListComponent({
                 })}
               {showTypingIndicator ? (
                 <div className="flex w-full items-start gap-3 py-2">
-                  {/* Plain <img>, not <MessageAvatar>/base-ui Avatar: Avatar.Image
-                      always starts blank and waits on a fresh JS-driven
-                      image.onload before painting anything (no fallback is
-                      passed here, so there's nothing to show meanwhile) --
-                      responses in this app often complete faster than that
-                      load+rerender cycle, so the load-gated avatar reads as
-                      never appearing. A plain img paints via the browser's
-                      normal (often cache-instant) path with no such gate.
-                      Always the "active" ring (psy-stream-pulse), never
-                      idle/researching -- this block only renders while a
-                      response is being generated, and no assistantParts
-                      exist yet pre-flight to detect a research escalation. */}
+                  {/* ElfAvatar renders a plain <img> internally, not
+                      <MessageAvatar>/base-ui Avatar: Avatar.Image always
+                      starts blank and waits on a fresh JS-driven image.onload
+                      before painting anything (no fallback is passed here,
+                      so there's nothing to show meanwhile) -- responses in
+                      this app often complete faster than that load+rerender
+                      cycle, so the load-gated avatar reads as never
+                      appearing. speaking=false: no tokens are flowing yet
+                      pre-flight, so idle+blink is correct, not the talk
+                      cycle (TypingIndicator's own shimmer already conveys
+                      "in progress"). Always the "active" ring
+                      (psy-stream-pulse), never idle/researching -- this
+                      block only renders while a response is being
+                      generated, and no assistantParts exist yet pre-flight
+                      to detect a research escalation. */}
                   <div className="mt-1 size-8 shrink-0 rounded-full border-2 animate-[psy-stream-pulse_1.6s_ease-in-out_infinite]">
-                    <img
-                      src="/brand/noetic-elf-avatar-64.png"
-                      alt="Cortex"
+                    <ElfAvatar
+                      speaking={false}
+                      frameSize={64}
                       className="h-full w-full rounded-full"
                     />
                   </div>

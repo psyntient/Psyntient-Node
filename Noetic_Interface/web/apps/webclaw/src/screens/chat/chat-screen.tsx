@@ -47,6 +47,7 @@ import { useChatRedirect } from './hooks/use-chat-redirect'
 import type { AttachmentFile } from '@/components/attachment-button'
 import type { ChatComposerHelpers } from './components/chat-composer'
 import { useExport } from '@/hooks/use-export'
+import { ElfAvatar } from '@/components/elf-avatar'
 import { useChatSettings } from '@/hooks/use-chat-settings'
 import { cn, randomUUID } from '@/lib/utils'
 
@@ -690,10 +691,12 @@ export function ChatScreen({
                 contentStyle={stableContentStyle}
                 emptyState={
                   <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                    <img
-                      src="/brand/psyntient-mark.png"
+                    <ElfAvatar
+                      speaking={false}
+                      sparkle={false}
+                      frameSize={128}
                       alt=""
-                      className="h-16 w-16 opacity-60"
+                      className="h-24 w-24 rounded-full animate-[psy-aura_7s_ease-in-out_infinite]"
                     />
                     <p className="font-serif text-xl text-primary-950">
                       What are we exploring today?
