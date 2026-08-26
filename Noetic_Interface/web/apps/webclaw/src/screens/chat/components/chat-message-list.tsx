@@ -224,10 +224,10 @@ function ChatMessageListComponent({
                       block only renders while a response is being
                       generated, and no assistantParts exist yet pre-flight
                       to detect a research escalation. */}
-                  <div className="mt-1 size-8 shrink-0 rounded-full border-2 animate-[psy-stream-pulse_1.6s_ease-in-out_infinite]">
+                  <div className="mt-1 size-10 shrink-0 rounded-full border-2 animate-[psy-stream-pulse_1.6s_ease-in-out_infinite]">
                     <ElfAvatar
                       speaking={false}
-                      frameSize={64}
+                      frameSize={40}
                       className="h-full w-full rounded-full"
                     />
                   </div>

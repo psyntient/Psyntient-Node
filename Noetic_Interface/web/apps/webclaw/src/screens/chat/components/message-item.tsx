@@ -358,16 +358,18 @@ function MessageItemComponent({
         <div className="flex w-full items-start gap-3">
           <div
             className={cn(
-              'mt-1 size-8 shrink-0 rounded-full',
-              isStreaming &&
-                (isResearching
-                  ? 'border-2 border-gold animate-[psy-morph_4s_linear_infinite]'
-                  : 'border-2 animate-[psy-stream-pulse_1.6s_ease-in-out_infinite]'),
+              'mt-1 size-10 shrink-0 rounded-full',
+              // The plain streaming pulse ring was dropped once the
+              // speaking-sparkles existed -- both signaled "actively
+              // replying" at once, which read as cluttered. Research mode
+              // keeps its own gold ring since it's a distinct, rarer state
+              // the sparkles alone don't communicate.
+              isResearching && 'border-2 border-gold animate-[psy-morph_4s_linear_infinite]',
             )}
           >
             <ElfAvatar
               speaking={isStreaming && !isResearching}
-              frameSize={64}
+              frameSize={40}
               className={cn(
                 'h-full w-full rounded-full',
                 !isStreaming && 'animate-[psy-aura_7s_ease-in-out_infinite]',
