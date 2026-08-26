@@ -103,7 +103,7 @@ export const Route = createRootRoute({
       },
       {
         rel: 'apple-touch-icon',
-        href: '/brand/noetic-app-icon-192.png',
+        href: '/brand/noetic-app-icon-192-v2.png',
       },
       {
         rel: 'manifest',
