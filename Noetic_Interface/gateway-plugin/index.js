@@ -165,7 +165,25 @@ export default {
       handler: route(async (req, res) => {
         const pairing = await daemonModule("pairing.mjs");
         if (req.method === "GET") {
-          return sendJson(res, 200, { ok: true, isPaired: pairing.isPaired() });
+          const paired = pairing.isPaired();
+          // Surface the node identity for the Settings > Psyntient Account
+          // section. readNodeKey() reads ~/.psyntient/node.key; the token
+          // itself is deliberately NOT returned -- only the identifiers a user
+          // needs to recognise their own Node.
+          let details = {};
+          if (paired) {
+            try {
+              const key = pairing.readNodeKey() ?? {};
+              details = {
+                nodeId: key.node_id ?? null,
+                contextId: key.context_id ?? null,
+                pairedAt: key.paired_at ?? null,
+              };
+            } catch {
+              /* identity is best-effort; pairing status is the contract */
+            }
+          }
+          return sendJson(res, 200, { ok: true, isPaired: paired, ...details });
         }
         if (req.method === "POST") {
           if (pairing.isPaired()) {
