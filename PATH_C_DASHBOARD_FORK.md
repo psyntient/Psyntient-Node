@@ -269,6 +269,33 @@ solved it. If it also sits at 15s, the remaining latency is backend (429
 rate-limiting, the ~19K-token prompt floor) and becomes a separate
 investigation.
 
+## PWA origin change — a real migration, plan it (flagged 2026-08-27)
+
+The installed PWA was installed from the **WebClaw Interface at
+`127.0.0.1:3210`**. The forked Control UI is served by the gateway at
+`127.0.0.1:18789`. A PWA is bound to the origin it was installed from, so:
+
+- The existing PWA **keeps working** against WebClaw for as long as
+  `interface-control.mjs` keeps serving 3210. Verified 2026-08-27: process
+  alive, `/` -> `/chat/main`. Nothing in Stage 1/2 touched it.
+- It will **never** pick up the fork, the reskin, or anything built after
+  this point — different app, different origin.
+- When WebClaw is decommissioned the installed PWA does not migrate. It
+  becomes an icon pointing at a dead port, and the user must install the new
+  one from `18789` by hand.
+
+**Do not treat this as a detail.** This project has already lost real time to
+PWA install/caching behaviour twice (the icon-shape saga, and the
+service-worker `ERR_FAILED` from caching the HTML document cache-first — see
+CLAUDE.md section 7). Decide the migration deliberately at Stage 4:
+whether to serve the fork on 3210 instead, to keep a redirect stub alive at
+the old origin, or to accept a one-time manual reinstall and tell the user
+plainly.
+
+Carry forward the hard-won service-worker rule to whatever ships next: never
+cache the HTML document cache-first; only content-hashed `/assets/*` are
+safe, and bump `CACHE_NAME` on any change.
+
 ## Stage 4 — Port the agent surface, in stages
 
 Order: chat → working-memory sync → PWA → compaction. Test speed after each.
