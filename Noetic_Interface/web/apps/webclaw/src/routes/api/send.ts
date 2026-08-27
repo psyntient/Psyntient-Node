@@ -67,7 +67,32 @@ export const Route = createFileRoute('/api/send')({
           }
 
           if (sessionKey.length === 0) {
-            sessionKey = 'main'
+            // Resolve the bare default to its canonical key instead of
+            // sending literal "main".
+            //
+            // gatewayRpcShared keys its pooled connection by this string, and
+            // /api/stream registers its listener under `sessionKey ||
+            // friendlyId` -- which for the default session is the canonical
+            // "agent:main:main". Sending "main" here therefore ran the turn on
+            // a DIFFERENT pooled connection than the one the SSE stream was
+            // listening on, so every event for the default session was emitted
+            // where nobody was subscribed.
+            //
+            // Measured: the default session received zero chat/agent events
+            // (not even `final`) while a fresh session on the same Gateway got
+            // status/delta/final normally. The reply still landed in history,
+            // so the UI only recovered via the 15s safety-net refetch or a
+            // page reload -- which is what surfaced as "blank reply" and as a
+            // fixed ~15-17s latency that no model or token change could move.
+            const resolvedDefault = await gatewayRpc<SessionsResolveResponse>(
+              'sessions.resolve',
+              { key: 'main', includeUnknown: true, includeGlobal: true },
+            ).catch(() => null)
+            const canonical =
+              typeof resolvedDefault?.key === 'string'
+                ? resolvedDefault.key.trim()
+                : ''
+            sessionKey = canonical.length > 0 ? canonical : 'main'
           }
 
           const res = await gatewayRpcShared<{ runId: string }>(
