@@ -33,9 +33,13 @@ export const Route = createFileRoute('/api/stream')({
               }
             }
 
+            // 2s, not 15s. This ping is a keepalive, but it was also acting
+            // as the de-facto flush trigger for buffered event data, so its
+            // interval set the worst-case delivery latency for every event.
+            // A short interval bounds that even if some layer still buffers.
             const heartbeat = setInterval(() => {
               controller.enqueue(encoder.encode('event: ping\ndata: {}\n\n'))
-            }, 15000)
+            }, 2000)
 
             const key = sessionKey || friendlyId
             if (key) {
@@ -102,6 +106,12 @@ export const Route = createFileRoute('/api/stream')({
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             Connection: 'keep-alive',
+            // Standard "do not buffer this stream" hint for any proxy in
+            // front of the app. Measured after adding it: SSE transit from
+            // server enqueue to browser receipt is ~1ms, so nothing on this
+            // side buffers today -- this is defensive for deployments that
+            // put a reverse proxy in the path, not a fix for a live bug.
+            'X-Accel-Buffering': 'no',
           },
         })
       },
