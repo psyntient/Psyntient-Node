@@ -253,12 +253,26 @@ the **old state dir**, so it inherited everything V2 existed to escape.
    to default). Result: **no improvement, slightly worse** (7.7-9.2s ->
    9.5-12.0s). Settings restored afterwards.
 3. **State — confirmed cause.** Same built code, same model, same workspace,
-   same auth; only a fresh state dir:
+   same auth; only a fresh state dir. Measured as real gateway RPCs on both
+   sides (see the retraction below for why the first attempt did not count):
 
-   | | contaminated state | fresh state |
+   | RPC | contaminated | fresh |
    |---|---|---|
-   | `sessions list` | 7.7 - 12.0s | **3.1 - 4.4s** |
+   | `sessions.list` | 2409-4083ms | **178ms** |
+   | `sessions.branches.list` | 880-1365ms | **103ms** |
+   | `chat.history` | 902-1386ms | **152ms** |
+   | plugin load at startup | 6.8s | **3.5s** |
    | startup verification/degraded/conflicting warnings | **57** | **0** |
+
+   **10-20x on identical code.**
+
+   **Retracted:** an earlier pass claimed "3x faster (7.7-12.0s -> 3.1-4.4s)"
+   from `openclaw sessions list`. That comparison was invalid — the clean run
+   printed `Sessions listed: 0` reading a local store, not the gateway
+   round-trip the contaminated run did. Do not cite that number. Also, the
+   first clean gateway never bound: port 18790 was already held by our own
+   `daemon/voice-transcription.mjs serve`, so those measurements hit a
+   different process entirely.
 
 ### What is wrong with the old state
 
@@ -277,6 +291,32 @@ the **old state dir**, so it inherited everything V2 existed to escape.
   sessions, the slow one **20**.
 - Transcripts are tiny (4-12 KB) and the session SQLite is 4.3 MB. Not data
   volume.
+
+### Gotchas when standing up a fresh state dir
+
+Hit in order, each one blocked startup:
+
+1. **`gateway.mode` is required** — without it the gateway refuses to start
+   ("existing config is missing gateway.mode... suspicious or clobbered").
+   Carry `mode` and `bind` along with `port`.
+2. **The API key is NOT in `openclaw.json`.** It lives in the agent's SQLite
+   auth store (`agents/main/agent/openclaw-agent.sqlite`). Copying
+   `auth.profiles` from config only carries the *declaration*, so the agent
+   fails with `missing-provider-auth`. Do **not** copy that sqlite across to
+   fix it — it is 45.9 MB (plus two 15 MB backups) and would reimport the
+   contamination. Re-paste the key instead:
+   `openclaw models auth paste-api-key --provider openrouter`.
+3. **Restart after pasting the key.** The gateway caches its model-catalog
+   snapshot at startup; adding auth to a running gateway yields
+   `prepared model catalog owner was not published for the requested config`
+   (`src/agents/prepared-model-catalog.ts:193`).
+
+### Not caused by contamination (present on clean state too)
+
+`controlUi.sessionPullRequests` still fails `UNAVAILABLE` (475-1284ms) on a
+clean store. Cause is unrelated: `gh` is not authenticated, and the workspace
+sits in a repo with a GitHub remote, so the Control UI queries PRs and times
+out. Worth removing in the fork — it buys nothing here.
 
 ### Consequence for the plan
 
