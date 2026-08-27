@@ -31,6 +31,8 @@
  * unprefixed one returns SPA HTML. Do not "tidy" this prefix away.
  */
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 // <NodeRoot>/Noetic_Interface/gateway-plugin/ -> <NodeRoot>/daemon/
@@ -38,6 +40,43 @@ const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON_DIR = path.resolve(PLUGIN_DIR, "..", "..", "daemon");
 const daemonModule = (name) =>
   import(new URL(`file://${path.join(DAEMON_DIR, name)}`).href);
+
+/** The Default Project: the Node's #general. Reserved, cannot be removed. */
+const DEFAULT_PROJECT_ID = "default";
+
+/** Project ids double as session category strings, so keep them filesystem-safe. */
+function slugifyProjectId(title) {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+/**
+ * Removes a project's Vault copy. Only reached by an explicit "delete
+ * permanently"; every other path leaves the Vault record intact, because per
+ * CLAUDE.md section 9 the Vault copy is the durable artefact and the working
+ * copy is the disposable one.
+ */
+function deleteVaultProject(projectId) {
+  try {
+    const vault = JSON.parse(
+      fs.readFileSync(
+        path.join(PLUGIN_DIR, "..", "..", "Neural_Vault", "vault.config.json"),
+        "utf8",
+      ),
+    );
+    const root = vault?.localPath
+      ? vault.localPath
+      : path.join(PLUGIN_DIR, "..", "..", "Neural_Vault", "local");
+    const device = os.hostname();
+    fs.rmSync(path.join(root, "Devices", device, projectId), { recursive: true, force: true });
+  } catch {
+    // Best effort: the working copy is already gone, and a missing Vault copy
+    // is the desired end state anyway.
+  }
+}
 
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
@@ -145,6 +184,138 @@ export default {
             }
             return sendJson(res, 200, { ok: true, ...vault.getStatus() });
           }
+          return sendJson(res, 400, { ok: false, error: "unknown action" });
+        }
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }),
+    });
+
+    // --- Provider key -----------------------------------------------------
+    // GET  -> { providers, hasProvider }
+    // POST -> { providerId, apiKey }  saves, then a REAL connection test
+    //
+    // Same setProviderKey() the CLI uses -- one implementation, per CLAUDE.md.
+    // The test is a genuine isolated inference call (daemon/provider-test.mjs),
+    // not a fake chat message: a key that saves but cannot talk is worse than
+    // no key, because the failure surfaces later as a broken chat.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/provider-key",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const providers = await daemonModule("providers.mjs");
+        if (req.method === "GET") {
+          return sendJson(res, 200, {
+            ok: true,
+            providers: providers.SUPPORTED_PROVIDERS,
+            hasProvider: await providers.hasAnyProvider(),
+          });
+        }
+        if (req.method === "POST") {
+          const body = await readJsonBody(req);
+          const providerId = typeof body.providerId === "string" ? body.providerId.trim() : "";
+          const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+          if (!providerId || !apiKey) {
+            return sendJson(res, 400, { ok: false, error: "providerId and apiKey required" });
+          }
+          await providers.setProviderKey(providerId, apiKey);
+          const tester = await daemonModule("provider-test.mjs");
+          const result = await tester.testProviderConnection(providerId);
+          return sendJson(res, 200, { ok: true, tested: result });
+        }
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }),
+    });
+
+    // --- Projects ---------------------------------------------------------
+    // GET  -> { projects: [{projectId,title,createdAt,lastSyncedAt}], defaultId }
+    // POST -> { title }                       create
+    //         { action:"archive", projectId }  sync to Vault, erase working copy
+    //         { action:"remove",  projectId }  erase working copy, KEEP the Vault
+    //         { action:"delete",  projectId }  erase working copy AND Vault copy
+    //
+    // This finally gives daemon/working-memory.mjs's project lifecycle its
+    // first caller -- it has been built and CLI-tested since Phase I with no
+    // UI behind it.
+    //
+    // A Project's id is also the session `category` string. One identifier,
+    // two representations; there is deliberately no mapping table.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/projects",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const wm = await daemonModule("working-memory.mjs");
+
+        // The Default Project is the Node's #general: casual chat and ideas
+        // still get a Vault record. Created through the same createProject()
+        // as everything else -- no special-cased second path. Threads with no
+        // category RESOLVE to it rather than being migrated, so existing
+        // threads stay reachable without a rewrite.
+        const ensureDefault = () => {
+          if (!wm.listProjects().some((p) => p.projectId === DEFAULT_PROJECT_ID)) {
+            wm.createProject({ projectId: DEFAULT_PROJECT_ID, title: "General" });
+          }
+        };
+
+        if (req.method === "GET") {
+          ensureDefault();
+          return sendJson(res, 200, {
+            ok: true,
+            projects: wm.listProjects(),
+            defaultId: DEFAULT_PROJECT_ID,
+          });
+        }
+
+        if (req.method === "POST") {
+          const body = await readJsonBody(req);
+          const action = typeof body.action === "string" ? body.action : "create";
+          const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
+
+          if (action === "create") {
+            const title = typeof body.title === "string" ? body.title.trim() : "";
+            if (!title) return sendJson(res, 400, { ok: false, error: "title required" });
+            const id = slugifyProjectId(title);
+            if (!id) return sendJson(res, 400, { ok: false, error: "title has no usable characters" });
+            wm.createProject({ projectId: id, title });
+            return sendJson(res, 200, { ok: true, project: { projectId: id, title } });
+          }
+
+          if (!projectId) return sendJson(res, 400, { ok: false, error: "projectId required" });
+          if (projectId === DEFAULT_PROJECT_ID && action !== "archive") {
+            // The Default Project is where unfiled threads live; removing it
+            // would strand them.
+            return sendJson(res, 400, { ok: false, error: "the default project cannot be removed" });
+          }
+
+          if (action === "archive") {
+            wm.syncProjectToVault(projectId);
+            wm.eraseProjectWorkingCopy(projectId);
+            return sendJson(res, 200, { ok: true, archived: projectId });
+          }
+
+          if (action === "remove" || action === "delete") {
+            // eraseProjectWorkingCopy() refuses unless a real sync has happened
+            // (it checks .project.json's lastSyncedAt, which only
+            // syncProjectToVault sets). That guard protects unsaved research,
+            // so surface it as a prompt to sync rather than a raw failure.
+            try {
+              wm.eraseProjectWorkingCopy(projectId);
+            } catch (err) {
+              return sendJson(res, 409, {
+                ok: false,
+                needsSync: true,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+            if (action === "delete") {
+              fs.rmSync(path.join(wm.paths.CORTEX_PROJECTS_DIR, projectId), {
+                recursive: true,
+                force: true,
+              });
+              deleteVaultProject(projectId);
+            }
+            return sendJson(res, 200, { ok: true, [action + "d"]: projectId });
+          }
+
           return sendJson(res, 400, { ok: false, error: "unknown action" });
         }
         return sendJson(res, 405, { ok: false, error: "method not allowed" });
