@@ -290,6 +290,40 @@ export function useChatStream({
                     }
                   }
                 }
+                // Last-resort duplicate guard before appending.
+                //
+                // Every identity check above keys off getMessageId(), but the
+                // Gateway's /api/history payload carries NO `id` field at all
+                // (verified live: messages arrive as {role, timestamp} only).
+                // So id-matching can never succeed, and a stream-delivered
+                // message plus the same message from a history refetch both
+                // fall through to here and get appended twice -- the reported
+                // "it sent 2 duplicates".
+                //
+                // Match on (role + identical normalized text) instead, which
+                // is stable across both sources. Only applies to non-empty
+                // text, so streaming partials (which legitimately differ) are
+                // untouched, and tool calls/results are matched by their own
+                // ids earlier.
+                const nextTextForDedup = normalizeAssistantTextForDedup(
+                  textFromMessage(nextMessage),
+                )
+                if (nextTextForDedup) {
+                  const twinIndex = messages.findIndex(
+                    (message) =>
+                      message.role === nextMessage.role &&
+                      normalizeAssistantTextForDedup(textFromMessage(message)) ===
+                        nextTextForDedup,
+                  )
+                  if (twinIndex >= 0) {
+                    const next = [...messages]
+                    next[twinIndex] = mergeStreamMessage(
+                      messages[twinIndex],
+                      nextMessage,
+                    )
+                    return next
+                  }
+                }
                 return [...messages, nextMessage]
               }
 

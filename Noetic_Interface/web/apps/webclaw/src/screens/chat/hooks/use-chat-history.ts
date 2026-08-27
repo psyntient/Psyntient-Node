@@ -86,9 +86,32 @@ export function useChatHistory({
   const stableHistorySignatureRef = useRef('')
   const stableHistoryMessagesRef = useRef<Array<GatewayMessage>>([])
   const historyMessages = useMemo(() => {
-    const messages = Array.isArray(historyQuery.data?.messages)
+    const rawMessages = Array.isArray(historyQuery.data?.messages)
       ? historyQuery.data.messages
       : []
+    // Hide superseded failed attempts.
+    //
+    // When the provider 429s, OpenClaw retries internally and persists EVERY
+    // failed attempt as its own assistant turn. A single question produced
+    // four "The agent run failed before producing a reply." bubbles followed
+    // by the real answer -- the retry worked, but the user watched it fail
+    // four times. Drop a failed attempt only when a later assistant message
+    // actually succeeded, so a genuinely failed turn still surfaces its
+    // error rather than rendering as silence.
+    const lastRealAssistant = (() => {
+      for (let i = rawMessages.length - 1; i >= 0; i -= 1) {
+        const m = rawMessages[i]
+        if (m.role !== 'assistant') continue
+        if (!isFailedAttemptMessage(m)) return i
+      }
+      return -1
+    })()
+    const messages =
+      lastRealAssistant === -1
+        ? rawMessages
+        : rawMessages.filter(
+            (m, i) => !(i < lastRealAssistant && isFailedAttemptMessage(m)),
+          )
     const last = messages.at(-1)
     const lastId = typeof last?.id === 'string' ? last.id : ''
     const lastRole = typeof last?.role === 'string' ? last.role : ''
@@ -144,6 +167,18 @@ function contentSignatureFromMessage(message: GatewayMessage): string {
     .join('|')
 }
 
+// A retry attempt OpenClaw persisted after a provider error. Matches the
+// literal text the runtime writes plus the stopReason/empty-content shape,
+// so it stays correct if the wording changes.
+function isFailedAttemptMessage(message: GatewayMessage): boolean {
+  if (message.role !== 'assistant') return false
+  const stop = (message as { stopReason?: unknown }).stopReason
+  const text = textFromMessage(message).trim()
+  if (text === 'The agent run failed before producing a reply.') return true
+  if (stop === 'error' && text.length === 0) return true
+  return false
+}
+
 function mergeStreamingHistoryMessages(
   serverMessages: Array<GatewayMessage>,
   streamingMessages: Array<GatewayMessage>,
@@ -162,7 +197,27 @@ function mergeStreamingHistoryMessages(
       if (serverMessage.role !== streamingMessage.role) return false
       const streamingTime = getMessageTimestamp(streamingMessage)
       const serverTime = getMessageTimestamp(serverMessage)
-      if (Math.abs(streamingTime - serverTime) > 15000) return false
+
+      // Identical text is proof of identity on its own -- never let the time
+      // window veto it. The streamed copy is stamped when its FIRST delta
+      // arrives; the server stamps the same message at completion. Any reply
+      // slower than the old hard 15s gate therefore had its two copies fall
+      // outside the window and got appended twice, which is the reported
+      // double-render (backend verified as holding exactly one message).
+      // Response times here routinely exceed 15s, so that gate was
+      // systematically wrong rather than an edge case.
+      const sameTextIdentity = (() => {
+        const a = normalizeAssistantTextForDedup(textFromMessage(streamingMessage))
+        const b = normalizeAssistantTextForDedup(textFromMessage(serverMessage))
+        return a.length > 0 && a === b
+      })()
+
+      // Widened from 15s to 120s for the non-identical (still-streaming
+      // partial) case, where text differs legitimately and timing is the
+      // only available signal.
+      if (!sameTextIdentity && Math.abs(streamingTime - serverTime) > 120000) {
+        return false
+      }
 
       if (
         typeof serverRunId === 'string' &&
@@ -270,7 +325,13 @@ function mergeOptimisticHistoryMessages(
       if (optimisticText !== textFromMessage(serverMessage)) return false
       const optimisticTime = getMessageTimestamp(optimisticMessage)
       const serverTime = getMessageTimestamp(serverMessage)
-      return Math.abs(optimisticTime - serverTime) <= 10000
+      // Reached only when role matches AND the text is already byte-identical
+      // (checked just above), so this window is a tiebreaker, not the identity
+      // test. 10s was too tight for the same reason the streaming path's 15s
+      // gate was: an optimistic user message is stamped client-side at send,
+      // while the server stamps it on persist, and a slow/queued turn pushes
+      // those apart -- leaving the optimistic copy stranded as a duplicate.
+      return Math.abs(optimisticTime - serverTime) <= 120000
     })
 
     if (!hasMatch) {

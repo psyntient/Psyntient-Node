@@ -61,7 +61,7 @@ export const Route = createFileRoute('/api/history')({
           // Retry with a short backoff rather than failing the request.
           let payload: ChatHistoryResponse | null = null
           let lastErr: unknown = null
-          for (let attempt = 0; attempt < 4; attempt += 1) {
+          for (let attempt = 0; attempt < 6; attempt += 1) {
             try {
               payload = await gatewayRpc<ChatHistoryResponse>('chat.history', {
                 sessionKey,
@@ -71,11 +71,19 @@ export const Route = createFileRoute('/api/history')({
             } catch (err) {
               lastErr = err
               const message = err instanceof Error ? err.message : String(err)
+              // "connect.challenge" is the Gateway WS handshake timing out --
+              // measured live at ~10% of requests, and the actual cause of the
+              // blank-chat reports (a 500 here means the UI gets no messages
+              // at all). It is transient by nature: the very next attempt
+              // almost always succeeds. The rebuild/projection cases are the
+              // separate, also-retryable transcript-projection condition.
               const retryable =
-                /rebuild|UNAVAILABLE|retry shortly|projection/i.test(message)
-              if (!retryable || attempt === 3) throw err
+                /rebuild|UNAVAILABLE|retry shortly|projection|connect\.challenge|Timed out waiting/i.test(
+                  message,
+                )
+              if (!retryable || attempt === 5) throw err
               await new Promise((resolve) =>
-                setTimeout(resolve, 150 * (attempt + 1)),
+                setTimeout(resolve, 250 * (attempt + 1)),
               )
             }
           }

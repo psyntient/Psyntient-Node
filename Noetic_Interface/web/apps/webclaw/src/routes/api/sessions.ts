@@ -70,7 +70,7 @@ export const Route = createFileRoute('/api/sessions')({
           // the whole chat list in the sidebar.
           let payload: SessionsListGatewayResponse | null = null
           let lastErr: unknown = null
-          for (let attempt = 0; attempt < 4; attempt += 1) {
+          for (let attempt = 0; attempt < 6; attempt += 1) {
             try {
               payload = await gatewayRpc<SessionsListGatewayResponse>(
                 'sessions.list',
@@ -84,11 +84,15 @@ export const Route = createFileRoute('/api/sessions')({
             } catch (err) {
               lastErr = err
               const message = err instanceof Error ? err.message : String(err)
+              // Includes the Gateway WS handshake timeout ("connect.challenge"),
+              // measured live at ~10% of requests -- see api/history.ts.
               const retryable =
-                /rebuild|UNAVAILABLE|retry shortly|projection/i.test(message)
-              if (!retryable || attempt === 3) throw err
+                /rebuild|UNAVAILABLE|retry shortly|projection|connect\.challenge|Timed out waiting/i.test(
+                  message,
+                )
+              if (!retryable || attempt === 5) throw err
               await new Promise((resolve) =>
-                setTimeout(resolve, 150 * (attempt + 1)),
+                setTimeout(resolve, 250 * (attempt + 1)),
               )
             }
           }
