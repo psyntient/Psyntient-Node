@@ -181,6 +181,63 @@ Steps 1-4 need no backend work and can land immediately. Steps 5-7 depend on
 the Stage 2 plugin routes, which are written but not yet loading (the shim
 path fix is in `psyntient-routes.ts` and needs a rebuild).
 
+## 6. Open considerations (raised 2026-08-27, decide after the first pass)
+
+Not decisions yet. Each is a genuine product fork in the road.
+
+### Multi-agent instances — powerful, but a complexity cliff
+
+The Control UI can create and manage **separate agent instances** (`pages/agents`,
+20 files). For researchers this is real capability: one agent per project or
+per line of inquiry, each with its own workspace, memory and model. Psyntient
+currently ships one agent (`Cortex_Agent`).
+
+The tension the user named: it could overwhelm non-developer users. Options,
+roughly in order of increasing ambition:
+
+1. **Hide it** (current plan). One agent, no concept to learn.
+2. **Expose it renamed** — surface agents as "Research Contexts" or similar,
+   with a sane default, so the power is there without the operator framing.
+3. **Derive it** — create an agent implicitly when a Project is created, so
+   users get isolation without ever seeing an "agents" concept.
+
+Option 3 is the most Psyntient-shaped and the most work. **Note:** each extra
+agent has a real cost — this is the same machinery whose plugin loading cost
+~22s per cold run, so per-agent isolation is not free.
+
+### Session sharing / multi-researcher on one Node — real, and unexplored
+
+`src/gateway/session-sharing.ts` is real: `resolveSessionVisibility`,
+`allowedSessionVisibilities`, `isSessionVisibilityAllowed`,
+`resolveSessionSharingTarget`, plus `isGatewayAdmin`. Sessions have a
+**visibility** model and a sharing target. Combined with thread branching
+(`sessions.branches.list`), the shape the user spotted is genuinely there:
+**multiple researchers collaborating on one Node.**
+
+Unanswered and load-bearing before any of this ships:
+- How does a second person authenticate? Today the Control UI is a single
+  device-bound admin token (`openclaw dashboard` mints a per-browser link).
+  Multi-user needs an identity model we do not have.
+- How does it interact with **psyntient.io pairing**, which is per-Node and
+  will gate subscription? Is a shared Node one seat or many?
+- Sovereignty: `CLAUDE.md` section 8 is emphatic that Vault contents never
+  leave the Node. Sharing sessions across people is a different boundary than
+  sharing across devices — think it through before enabling.
+
+**Do not enable sharing by default** until those are answered.
+
+### Automations and plugins — recommendation: drop automations, keep plugins as config
+
+- **`automation`** — drop. It is scheduled/triggered agent runs, an operator
+  feature, and overlaps `cron` which is already dropped.
+- **`plugins` / `plugin` pages** — drop the *management UI*, but plugins
+  themselves are now load-bearing: the `plugins.allow` list is what made the
+  Node fast. That belongs in config, not a browsable catalog. If users ever
+  need to toggle capability, expose a small curated "Capabilities" section in
+  Settings rather than OpenClaw's full plugin manager.
+- **`mcp`** — keep (see 3b). It is the one extension surface that adds real
+  research capability without us writing code.
+
 ## 5. Rules carried over
 
 - Every change to `ui/` grows the re-apply surface on OpenClaw updates. The
