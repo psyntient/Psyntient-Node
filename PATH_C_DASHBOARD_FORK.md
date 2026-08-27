@@ -337,8 +337,10 @@ drop any.
 
 ### API routes (15) — `web/apps/webclaw/src/routes/api/`
 `artifact` `history` `onboarding` `pairing` `paths` `ping` `projects`
-`provider-key` `send` `sessions` `stream` `transcribe` `usage` `vault`
-`working-memory`
+`provider-key` `send` `sessions` `stream` `usage` `vault` `working-memory`
+
+**`transcribe` is NOT ported — retired by decision 2026-08-27.** See
+"Voice-to-text" below.
 
 These are server-side handlers that shell out to the daemon or call
 `gatewayRpc`. The Lit app has its own server surface — each of these needs a
@@ -390,15 +392,42 @@ bump `CACHE_NAME` on any change.
 ### Daemon modules (16) — `daemon/`, unchanged by the port
 `device-name` `heartbeat-control` `heartbeat-loop` `interface-control`
 `launch` `onboarding` `open-browser` `openclaw-cli` `openclaw-control`
-`pairing` `provider-test` `providers` `vault` `voice-transcription-control`
-`voice-transcription` `working-memory`
+`pairing` `provider-test` `providers` `vault` `working-memory`
+
+~~`voice-transcription-control` `voice-transcription`~~ — **retired**, see
+"Voice-to-text" below.
 
 These are already correct and verified against the real production API.
 The port is a **UI-layer port** — do not rewrite these. But every one of
 them has a caller on the interface side that must be re-established.
 
+### Voice-to-text: use OpenClaw's, retire ours (decided 2026-08-27)
+
+User decision: *"lets use the openclaw dashboard voice-to-text rather than
+the one we built before. retire the one we built."*
+
+The Control UI ships its own voice input, so porting ours would mean
+maintaining a second implementation of a feature the fork already has —
+exactly the duplication Path C exists to avoid (same reasoning as the
+provider-key step, where OpenClaw's native `model-setup` replaces our
+`/api/provider-key` flow).
+
+**Retire, do not port:**
+- `apps/webclaw/src/routes/api/transcribe.ts`
+- `daemon/voice-transcription.mjs`
+- `daemon/voice-transcription-control.mjs`
+
+Retire them at the point WebClaw is actually decommissioned, not before —
+the current Interface still serves them until the fork replaces it.
+
+**Checked: retirement is clean.** `daemon/launch.mjs` does *not* start the
+voice transcription process (unlike `interface-control.mjs` and
+`heartbeat-control.mjs`, whose PID-file pattern it shares), and the only
+references anywhere are the three files themselves. Deleting them together
+breaks nothing else.
+
 ### Features that must not be lost
-- Voice-to-text (`transcribe` route + `voice-transcription*.mjs`)
+- ~~Voice-to-text (ours)~~ — **use OpenClaw's built-in instead**, see below
 - Streaming text appearance / highlight
 - Working-memory sync on turn completion (wired via `displayMessages`
   effect + 20s idle poll — **not** the SSE `final` event, which was tested
