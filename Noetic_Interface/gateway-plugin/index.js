@@ -192,6 +192,14 @@ export default {
           await pairing.pairStart();
           return sendJson(res, 200, { ok: true, isPaired: pairing.isPaired() });
         }
+        if (req.method === "DELETE") {
+          // Explicit unpair. Destructive and not casually reversible: getting
+          // paired again means a full browser round-trip through
+          // psyntient.io/link-node (AUTH_FLOW.md). The Interface confirms
+          // before calling this.
+          pairing.unpair("user requested unpair from Settings");
+          return sendJson(res, 200, { ok: true, isPaired: pairing.isPaired() });
+        }
         return sendJson(res, 405, { ok: false, error: "method not allowed" });
       }),
     });

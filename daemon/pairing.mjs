@@ -53,7 +53,10 @@ function writeNodeKey(data) {
   fs.writeFileSync(NODE_KEY_PATH, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
 }
 
-function unpair(reason) {
+// Exported so the Interface can offer an explicit "Unpair this Node" action.
+// Same path the heartbeat uses when psyntient.io reports the token revoked
+// (AUTH_FLOW.md rule 5), so there is one way a Node becomes unpaired.
+export function unpair(reason) {
   try {
     fs.unlinkSync(NODE_KEY_PATH);
   } catch {
