@@ -54,7 +54,48 @@ Do these in order. Do not jump ahead; each stage gates the next.
   /custodian /automation /model-providers /model-setup /memory-import
   /skill-workshop …`
 
-## Stage 1 — Reskin (do first)
+## Stage 1 — Reskin — **DONE 2026-08-27** (`6fcfe4258da` on branch `psyntient`)
+
+Built and visually verified on the live Gateway. Every token matches
+`theme.json` exactly (checked via computed style, not by eye):
+`--bg #0c0a1d`, `--accent`/`--primary #eebc4a`, `--card #14122b`,
+`--text-strong #fef4e3`, `--accent-2 #e38f00`, `--destructive #db1f25`.
+
+**Re-apply surface — 8 files. Every one was required for the default to
+actually hold; changing only `theme.ts` is not enough:**
+
+| file | why it had to change |
+|---|---|
+| `ui/src/styles/base.css` | the `:root[data-theme="psyntient"]` family |
+| `ui/src/app/theme.ts` | `ThemeName`/`ResolvedTheme` unions, allowlist, dark-only resolve |
+| `ui/src/app/settings.ts` | **the real boot default** (was `"claw"` at line 413) |
+| `ui/src/app/server-prefs.ts` | allowlist — without it the choice never persists to the gateway |
+| `ui/index.html` | anti-FOUC pre-boot script **duplicates** the resolve logic; also the fresh-install path |
+| `ui/src/styles/config.css` | theme-picker preview chips |
+| `ui/src/pages/config/view-appearance.ts` | theme-picker card |
+| `ui/src/i18n/locales/*.ts` (21) | picker label + login subtitle |
+
+**Two traps worth remembering for any future theme work here:**
+1. `theme.ts`'s `parseThemeSelection` fallback is **not** the boot default.
+   The real default is `settings.ts:413`. Patching the former does nothing
+   visible.
+2. `index.html` carries a standalone pre-boot script that re-implements
+   theme resolution in plain JS for anti-FOUC. Upstream's version
+   `return`s early when no settings are stored — leaving **no**
+   `data-theme` at all, so a fresh install fell through to the bare
+   `:root` block, which is the Claw palette. That early return *is* the
+   first-run path for a product fork, so it now paints Psyntient.
+
+Branding also applied: login mark (`public/psyntient-mark.png`), wordmark
+"Psyntient", subtitle "Noetic Interface" (all 21 locales), page title,
+`favicon.svg`/`favicon-32.png`/`apple-touch-icon.png`, and the webmanifest
+(name/short_name/theme_color/background_color).
+
+Upstream's pre-commit lint hook ran and passed on all 27 checked files, so
+the locale edits are correctly formatted — not just syntactically valid.
+
+### Original Stage 1 spec (kept for reference)
+
 
 Source of truth: `Noetic_Interface/branding/BRANDING.md` (authoritative),
 with `theme.json` as the machine-readable token subset. Palette:
@@ -109,6 +150,28 @@ Non-negotiables carried over from `CLAUDE.md`:
   branch too, or it blocks its own destination forever. (Real bug, already
   hit once in WebClaw.)
 - Full protocol: `daemon/docs/AUTH_FLOW.md` v1.0. Read it first.
+
+## Blocked: automated UI speed measurement in the sandboxed browser
+
+Attempted 2026-08-27, could not complete — recording so it is not retried
+blindly.
+
+The dashboard's own trivial-message latency is the decisive open question
+(see Stage 3). Measuring it needs an **authenticated** dashboard session,
+and the sandboxed browser pane is a fresh profile with no stored token:
+- `openclaw dashboard --no-open --json` (the documented way to mint an
+  authed URL) **hung past 2 minutes** and wrote nothing, despite the
+  Gateway being up and answering HTTP 200. Not diagnosed further.
+- Reading `gateway.auth.token` from `openclaw.json` to build the
+  `#gatewayUrl=…&token=…` URL the app accepts (`app/startup-settings.ts`)
+  was **blocked by the safety classifier**. Not worked around.
+- The user's real Chrome (which already has an authenticated dashboard)
+  reported no connected browsers, so that route was unavailable too.
+
+**The measurement itself is trivial for the user to run** with the same
+stopwatch method used for every other number in this file — open the
+dashboard, send "how are you", time until it renders. That single number
+decides whether Path C fixes speed. It does not block Stage 2.
 
 ## Stage 3 — Speed test (checkpoint)
 
