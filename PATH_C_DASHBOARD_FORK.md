@@ -234,7 +234,59 @@ stopwatch method used for every other number in this file — open the
 dashboard, send "how are you", time until it renders. That single number
 decides whether Path C fixes speed. It does not block Stage 2.
 
-## Stage 3 — Speed test (checkpoint)
+## Stage 3 RESULT — measured 2026-08-27. **The UI was never the bottleneck.**
+
+First real run of the forked dashboard against the live Node. Timings taken
+from the gateway log, not a stopwatch:
+
+```
+10:33:34.332  chat.send accepted
+10:33:55.425  model request leaves for openrouter   <- 21.1s of PRE-MODEL work
+10:33:57.711  model responded 200                   <-  2.3s of inference
+```
+
+**90% of the turn is spent before the model is called.** The provider and
+model are fine (2.3s for gemini-2.5-flash). This is the same on the
+dashboard as it was on WebClaw, which settles the open question: **Path C
+does not fix the speed problem, because the problem was never in the UI.**
+The user's on-screen observation — "it loads context, loads workspace, then
+starts model" — is literally what the log shows.
+
+### What fills the 21 seconds
+
+During that window the gateway is doing, repeatedly:
+
+| operation | observed durations |
+|---|---|
+| `sessions.list` | 2409ms, 1323ms, 3926ms, 3990ms |
+| `chat.history` | 1302ms, 902ms, 1386ms, 1043ms |
+| `sessions.branches.list` | ~880-1365ms each |
+| `controlUi.sessionPullRequests` | **16980ms**, then failed `UNAVAILABLE` |
+| tool-policy recompute | ran **3 times** in one turn |
+
+**This is not data volume.** The store holds only 20 sessions and a 4.3 MB
+SQLite. `sessions.list` taking 2-4 seconds against 20 sessions is anomalous
+in itself, and the Control UI polls it continuously.
+
+**Leading hypothesis, not yet proven:** the Control UI's own polling
+(`sessions.list` with `includeLastMessage` + `includeDerivedTitles`,
+`sessions.branches.list`, `controlUi.sessionPullRequests`) contends with the
+agent's context assembly on the same process. A 17s `controlUi.sessionPullRequests`
+that ends in `UNAVAILABLE` is pure waste and a prime suspect. Next step is to
+measure a turn with the UI closed (send via CLI) — if the pre-model phase
+collapses, contention is confirmed; if it stays ~20s, the cost is genuinely
+in context/workspace assembly.
+
+### Consequences for the plan
+
+- **Do not expect Stage 4 to improve latency.** Porting more UI cannot move a
+  number that is 90% server-side.
+- The speed work is a **separate backend track**: context assembly, the
+  session-store query cost, and the redundant/failing Control UI polls.
+- Path C is still justified on its original grounds — rendering reliability
+  and not maintaining a second UI — just not on speed.
+
+## Stage 3 — Speed test (original plan, kept for reference)
 
 Measure with the same method the user used: stopwatch, real UI.
 
