@@ -107,12 +107,38 @@ Requirements:
 - Its `project_id` should be a stable reserved string (e.g. `default`) so the
   resolution rule above is a constant, not a lookup.
 
-## Decisions to make before building
-- **Does creating a Project create its Vault directory immediately, or lazily
-  on first sync?** `createProject()` scaffolds eagerly today.
-- **Deleting a Project:** must not delete its threads by default. Recommend
-  unfiling them to "All threads" and leaving the Vault copy intact — the Vault
-  record is the durable artefact, per CLAUDE.md section 9.
+## Removing a Project — three outcomes, framed by risk
+
+Decided 2026-08-27. The user asked for three choices (everything / chats only
+/ Vault only). Same outcomes, but named so the safe one is obvious and the
+destructive one is deliberate:
+
+| action | effect | notes |
+|---|---|---|
+| **Archive project** | `syncProjectToVault()` then `eraseProjectWorkingCopy()` | the *designed* lifecycle, already built. Not a deletion — the Vault copy survives and the project can be reopened from it. |
+| **Remove from this device** | delete chats + working copy, **Vault kept** | recoverable from the Vault |
+| **Delete permanently** | chats, working copy and Vault record | destructive; require a typed confirmation |
+
+Threads are unfiled to the Default Project, never deleted, unless the user
+picks "Delete permanently".
+
+**"Delete Vault data only" is deliberately NOT a peer option.** It inverts the
+durability model: per CLAUDE.md section 9 the Vault copy is the durable
+artefact and the working copy is disposable, so that choice destroys the
+preserved half and keeps the scratch half. The legitimate cases (reclaiming
+space, redoing a bad sync) are rare enough to live in Settings if wanted at
+all — not one mis-click away in a project menu.
+
+**Surface the existing erase guard properly.** `eraseProjectWorkingCopy()`
+throws unless `.project.json` has a `lastSyncedAt`, which only a real
+`syncProjectToVault()` sets (`daemon/working-memory.mjs:259-268`). That guard
+is protecting genuinely unsaved research, so the UI must catch it and offer
+"Sync to Vault first, then archive" rather than surfacing a raw error.
+
+## Decisions settled
+
+- **Vault scaffolding stays eager.** `createProject()` creates the directory
+  on creation, as it does today.
 
 ## What this explicitly does NOT do
 
