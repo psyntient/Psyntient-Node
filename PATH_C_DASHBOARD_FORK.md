@@ -216,6 +216,44 @@ Then prune operator routes from nav (`/debug`, `/cron`, `/custodian`,
 `/infrastructure`) and add product views (Projects, Neural Vault) as new Lit
 components.
 
+## Protocol drift: why Path C cannot repeat the WebClaw break
+
+Verified in source 2026-08-27, in answer to "will this block users who
+download the app if OpenClaw gets updated?" **No — structurally.**
+
+- **WebClaw hardcoded it.** `apps/webclaw/src/server/gateway.ts` set
+  `minProtocol`/`maxProtocol` to a literal `3`. A separate app pointing at
+  a gateway it did not ship with, so when the bundled gateway required 4
+  every API route failed. Hence the hand-applied patch on every update.
+- **The Control UI imports it.** `ui/src/api/gateway.ts:75-76` sends
+  `clientMinProtocol: MIN_CLIENT_PROTOCOL_VERSION` / `clientMaxProtocol:
+  PROTOCOL_VERSION`, both from `packages/gateway-protocol` — the same
+  package the gateway reads its own value from. No independent number
+  exists to drift.
+- **The gateway serves the UI from its own package.**
+  `resolveControlUiRootSync` (`src/infra/control-ui-assets.ts:189`) walks
+  candidates relative to the gateway's own module/exec dir
+  (`dist/control-ui`, `../Resources/control-ui`). UI and gateway ship as
+  one artifact and advance together.
+- Mismatch handling, for reference: `connect-admission.ts` logs
+  `PROTOCOL_MISMATCH` and closes with `1002`.
+
+**What IS at risk on an OpenClaw update: the reskin, not connectivity.**
+The Stage 1 patch lives in the upstream tree. Replace `Cortex/Open-Claw/`
+without re-applying the `psyntient` branch and users get a fully working
+dashboard in OpenClaw red. Unbranded, not blocked.
+
+**The one way to recreate the WebClaw bug — decide this deliberately at
+Stage 4, not by accident:** shipping our reskinned `dist/control-ui` as a
+*separate* artifact on its own port (the way the current Interface runs on
+3210) while the gateway updates independently. That restores the exact
+drift. Keep building the UI from the same checkout shipped as the gateway,
+and let the gateway serve it.
+
+**End-user auth is not a blocker either:** users never type a token; the
+gateway serves the UI same-origin and mints credentials. The auth blocker
+recorded above was an artifact of a sandboxed fresh browser profile only.
+
 ## Rejected paths (do not retry)
 
 - **tweakcn theme import** — stored per browser profile, never synced to
