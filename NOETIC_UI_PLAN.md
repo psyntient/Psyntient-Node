@@ -258,6 +258,38 @@ So per-agent isolation is **materially affordable**. The real costs are
 conceptual (a second thing to understand) and state sprawl over time, not
 latency.
 
+**Creating an instance needs no identity — confirmed.** `openclaw agents add
+[name]` takes an *optional* name, and `--non-interactive` requires only
+`--workspace`. Model and everything else inherit `agents.defaults`. A "New
+Project" button could create an instance silently; the user never meets an
+"agent" concept or names one. That was the user's main worry and it does not
+apply.
+
+**The real catch: agent identity is workspace-relative.** `AGENTS.md`,
+`SOUL.md`, `MEMORY.md` and `CAPABILITIES.md` live inside
+`Cortex/Cortex_Agent/`. Point a per-Project agent at its own workspace
+directory and it inherits none of them — it is a blank agent, not Cortex.
+That is the opposite of the intent ("they should all be Cortex agent, but
+different instances").
+
+So the work is **persona coherence across instances**, not disk or latency.
+Options, unevaluated:
+1. Scaffold each Project workspace with the Cortex identity files (copy on
+   create; they then drift per project — possibly desirable for MEMORY.md,
+   definitely not for SOUL.md).
+2. Keep one shared identity directory and give each Project only its own
+   memory/scratch (needs OpenClaw to support split identity vs. state, which
+   is unverified).
+3. Do not create agents at all — one Cortex, with memory scoped per Project.
+   Cheapest if `memory-core` supports it.
+
+**Projects must map to real Vault projects.** A Project is not merely an agent
+instance: it is `cortex_projects/<project_id>/` with the Vault lifecycle in
+`daemon/working-memory.mjs`, created by Cortex with the user or added
+programmatically later. Whatever agent model is chosen, the Project record is
+the durable thing and the agent instance is an implementation detail hanging
+off it — never the reverse.
+
 **Opinion, asked for 2026-08-27:** worth it for a research lab, as an
 **opt-in toggle, default off**.
 
