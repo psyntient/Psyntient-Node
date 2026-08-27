@@ -17,7 +17,40 @@ import { ensureRunning as ensureInterfaceRunning, url as interfaceUrl } from "./
 import { ensureRunning as ensureHeartbeatRunning } from "./heartbeat-control.mjs";
 import { activateLocal as activateLocalVault } from "./vault.mjs";
 import { ensureScaffold as ensureWorkingMemoryScaffold } from "./working-memory.mjs";
+import fs from "node:fs";
 import { openInBrowser } from "./open-browser.mjs";
+
+
+/**
+ * Builds a self-authenticating dashboard URL.
+ *
+ * THIS IS WHAT MAKES "NO TERMINAL" TRUE. The daemon runs locally and can read
+ * the gateway token, so it hands the browser credentials directly instead of
+ * opening a bare URL that greets the user with "Could not connect" and advice
+ * to run `openclaw dashboard` -- which a non-developer cannot act on.
+ *
+ * The Control UI reads gatewayUrl/token from the location hash
+ * (ui/src/app/startup-settings.ts) and then persists a device identity in
+ * localStorage, so this is paid once per browser; later launches just work.
+ * The hash is never sent to a server, and this only targets loopback.
+ *
+ * Falls back to the bare URL if the token cannot be read: a Node that opens an
+ * unauthenticated dashboard is still better than one that opens nothing.
+ */
+function authedDashboardUrl(baseUrl) {
+  try {
+    const config = JSON.parse(fs.readFileSync(gatewayPaths.CONFIG_PATH, "utf8"));
+    const token = config?.gateway?.auth?.token;
+    const port = config?.gateway?.port ?? gatewayPaths.GATEWAY_PORT;
+    if (!token) {
+      return baseUrl;
+    }
+    const hash = new URLSearchParams({ gatewayUrl: `ws://127.0.0.1:${port}`, token }).toString();
+    return `${baseUrl.replace(/#.*$/, "")}#${hash}`;
+  } catch {
+    return baseUrl;
+  }
+}
 
 async function main() {
   // Idempotent, synchronous, spawns a detached long-running process that
@@ -48,7 +81,7 @@ async function main() {
     url = gatewayStatus.interfaceUrl || `http://127.0.0.1:${gatewayPaths.GATEWAY_PORT}/`;
   }
   console.log(`Opening ${url}`);
-  openInBrowser(url);
+  openInBrowser(authedDashboardUrl(url));
 }
 
 main().catch((err) => {
