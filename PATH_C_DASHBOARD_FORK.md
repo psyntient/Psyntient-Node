@@ -274,8 +274,35 @@ plugin modules, proportional to how many plugins are active. Consistent with
 the second turn in the same session costing only 8.8s pre-model: partially
 warmed.
 
-**Fix under test:** `plugins.allow` restricted to what a chat Node needs.
-Gateway then reports `2 plugins: memory-core, openrouter` instead of 18.
+**FIX CONFIRMED 2026-08-27.** `plugins.allow: ["openrouter","memory-core"]`
+— gateway reports `2 plugins` instead of 18.
+
+| | before | after |
+|---|---|---|
+| pre-model, cold turn | 27.0s | **1.21s** |
+| pre-model, 2nd turn | 8.8s | **1.22s** |
+
+**~22x, and now flat.** The cold/warm gap disappearing is the real proof the
+lazy module loading is gone rather than merely warmed. `[trace:embedded-run]`
+stopped emitting on the fixed gateway (it only fires when a phase is slow).
+User-observed end to end: **~5s for one-word replies, ~10s for a 500-word
+essay** (was 27-30s and 13-15s).
+
+**Cost of the fix — decide deliberately, do not let it be discovered later:**
+16 plugins are off, including `browser`, `canvas`, `file-transfer`,
+`talk-voice`, `acpx`, `opencode`, `ollama`, `device-pair`, `phone-control`,
+`bonjour`, and the meeting integrations. Chat and memory work; anything
+depending on those does not. Add back one at a time — each now has a
+measurable startup cost, so the trade is visible.
+
+**The UI still shows "loading context, workspace, model" per message.** Those
+are real phases (`bootstrap-context`, `workspace-sandbox`, the model call),
+not cosmetic; they now complete in ~1.2s total so they flash past. Hiding
+them is a Stage 4 UI tweak, not a performance issue.
+
+**Still to do:** this fix lives only on the clean state dir used for testing.
+The production Node (port 18789, `~/.psyntient/openclaw-state`) is untouched
+and still slow.
 
 ### What this corrects
 
