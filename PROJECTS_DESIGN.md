@@ -79,14 +79,35 @@ Nothing here needs new infrastructure. Every piece is an existing seam:
 5. **Inherit on create.** A thread started while a Project is active is
    patched with that `category` immediately, so it lands in the right place
    without the user filing it.
-6. **An "All threads" pseudo-Project** so nothing becomes unreachable, and so
-   existing uncategorised threads remain visible after the change.
+6. **A Default Project**, created on first run. See below.
+
+## The Default Project
+
+A real Project, not a pseudo-scope: general chat, ideas, personal use — the
+`#general` of the Node. Better than the "All threads" filter this document
+originally proposed, because it means casual thinking still gets a Vault
+record and can be synced, searched and kept like anything else. Nothing a
+researcher types is stranded outside the Vault.
+
+**Verified 2026-08-27: one does not exist today.** `Working_Memory/cortex_projects/`
+is empty and `Neural_Vault/local/Devices/<device>/` is empty — the Vault
+scaffolds the *structure* but has never created a project, because
+`createProject()` still has no caller. Meanwhile `chat_context/` already holds
+**30 thread mirrors**, so every existing thread is currently project-less.
+
+Requirements:
+
+- Created on first run if absent, by the same `createProject()` everything
+  else uses — no special-cased second path.
+- **Existing uncategorised threads belong to it** by resolution, not by
+  migration: a row with no `category` resolves to the Default Project rather
+  than being patched. That keeps the 30 existing threads visible with no
+  rewrite, and means a thread never has to be "filed" to be reachable.
+- Cannot be deleted. Deleting other Projects unfiles their threads back to it.
+- Its `project_id` should be a stable reserved string (e.g. `default`) so the
+  resolution rule above is a constant, not a lookup.
 
 ## Decisions to make before building
-
-- **Where do uncategorised threads go?** Recommend an always-present
-  "All threads" scope rather than a catch-all Project, so nothing is hidden by
-  a filter the user did not set.
 - **Does creating a Project create its Vault directory immediately, or lazily
   on first sync?** `createProject()` scaffolds eagerly today.
 - **Deleting a Project:** must not delete its threads by default. Recommend
