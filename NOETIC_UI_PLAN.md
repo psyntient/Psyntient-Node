@@ -185,7 +185,50 @@ path fix is in `psyntient-routes.ts` and needs a rebuild).
 
 Not decisions yet. Each is a genuine product fork in the road.
 
-### Multi-agent instances — powerful, but a complexity cliff
+### Projects sit ABOVE threads — correcting §2 of this plan
+
+`CLAUDE.md` §9 already defines the hierarchy and it is **not** "Projects =
+renamed sessions". The earlier recommendation in §2 of this file was wrong
+against the designed model:
+
+```
+Project (cortex_projects/<project_id>/)      <- Vault-backed, durable
+  notes.md, scratch/, logs/
+  syncs to Neural_Vault/Devices/<device>/<project_id>/
+  └── chat threads (chat_context/<thread_id>/)   <- session transcripts
+```
+
+A **Project** is the durable research unit with a Vault lifecycle (create ->
+scaffold -> work -> sync to Vault -> erase working copy). **Threads** are
+conversations inside it. WebClaw only ever had the flat version because the
+Project machinery in `daemon/working-memory.mjs` has no UI caller yet.
+
+So the sidebar should be **two levels**: Projects, expanding to their threads.
+Do not ship the flat rename as the final model — it is fine as an interim
+label, but the nesting is the design.
+
+### Node Teams — session sharing becomes a paid tier (decided 2026-08-27)
+
+Multi-researcher sharing is a **subscription tier**, not a free capability:
+higher tier = **Node Teams (multi-seat)**. This resolves the seat question
+cleanly — psyntient.io owns entitlement, and the Node already asks it.
+
+`daemon/heartbeat-loop.mjs` ticks `heartbeat()` every 5 minutes against
+`psyntient.io/api/public/nodes/heartbeat`, so the entitlement channel exists
+today. Gate sharing on the heartbeat response.
+
+Two constraints that still stand:
+- **Second-user identity is still unbuilt.** Today the Control UI is a single
+  device-bound admin token per browser. Tier entitlement says *whether* a Node
+  may have seats; it does not say *who* the second person is. That is Plane C
+  (`/pair-interface`, `noetic_session`) in `daemon/docs/AUTH_FLOW.md`, still
+  not built.
+- **Vault sovereignty is unchanged.** Sharing sessions across *people* is a
+  different boundary than across devices. Nothing about a paid tier changes
+  `CLAUDE.md` §8 — psyntient.io still never learns where a Vault lives or what
+  is in it.
+
+### Multi-agent instances — cheaper than first assessed
 
 The Control UI can create and manage **separate agent instances** (`pages/agents`,
 20 files). For researchers this is real capability: one agent per project or
@@ -201,9 +244,36 @@ roughly in order of increasing ambition:
 3. **Derive it** — create an agent implicitly when a Project is created, so
    users get isolation without ever seeing an "agents" concept.
 
-Option 3 is the most Psyntient-shaped and the most work. **Note:** each extra
-agent has a real cost — this is the same machinery whose plugin loading cost
-~22s per cold run, so per-agent isolation is not free.
+Option 3 is the most Psyntient-shaped and the most work.
+
+**Correction to the earlier cost warning.** That caution was based on the
+~22s cold-run figure — measured *before* the `plugins.allow` fix. Actual cost
+of an additional agent, measured:
+
+- **448 KB** of disk for a second agent (`agents/agent/`), against 89 MB for
+  the accumulated `agents/main/`
+- **~1.2s** cold pre-model time now, not 22s
+
+So per-agent isolation is **materially affordable**. The real costs are
+conceptual (a second thing to understand) and state sprawl over time, not
+latency.
+
+**Opinion, asked for 2026-08-27:** worth it for a research lab, as an
+**opt-in toggle, default off**.
+
+- The value is not speed, it is **memory isolation** — findings from one line
+  of inquiry not bleeding into another. For research integrity that is
+  substantive, not cosmetic, and it is exactly what a lab with several
+  parallel projects would want.
+- Default *on* would be wrong: it multiplies state and creates a confusing
+  failure mode ("why doesn't it remember what I told it last week?") for the
+  single-project user who never asked for isolation.
+- **Try the cheaper path first:** if `memory-core` supports per-session or
+  per-project scoping, isolation may be achievable inside one agent, with no
+  agent multiplication at all. Verify that before building per-Project agents
+  — it could make the whole question moot.
+- If built: bind it to Project creation (option 3), never expose an "agents"
+  concept, and make the toggle a property of the Project.
 
 ### Session sharing / multi-researcher on one Node — real, and unexplored
 
