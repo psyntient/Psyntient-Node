@@ -134,7 +134,7 @@ in `ui/src/app-navigation.ts:204`). Verdicts:
 | `security` | **KEEP, trim** | |
 | `about` | **KEEP, trim** | Psyntient about box |
 | `custodian` | drop | infra babysitting |
-| `channels` / `communications` | hide | product decision, code stays |
+| `channels` / `communications` | **KEEP** (reversed 2026-08-27) | connectors like Telegram are a genuine feature for a research Node -- reach Cortex from your phone. Earlier verdict was "hide"; user overruled and is right. |
 | `nodes` | drop | remote fleet |
 | `agents` / `ai-agents` | drop | Psyntient runs one agent |
 | `labs` / `automation` | drop | |
@@ -156,6 +156,43 @@ to psyntient.io. Data comes from the Stage 2 route
 Constraint from `CLAUDE.md`: pairing and the LLM key stay **decoupled** — a
 bad API key must never surface as an account/pairing problem, and vice versa.
 Two separate sections, two separate error states.
+
+### Provider keys: accept ANY key (decided 2026-08-27)
+
+Providers are plugins, so the speed fix's `plugins.allow` had the side effect
+of leaving the setup wizard able to offer only OpenRouter. Wrong for a
+BYO-key product.
+
+**Resolved at no cost.** 29 of 32 provider plugins declare
+`activation.onStartup: false`, so allowing them all is free at startup — they
+load only when a key for that provider is actually configured. Measured: 3
+plugins still load eagerly (anthropic, memory-core, openrouter), startup 4.2s
+-> 5.0s, and that second is `anthropic`, the one major provider that is eager.
+
+`plugins.allow` is now 32 entries. **Rule for future edits: never restrict
+providers for performance.** Check `activation.onStartup` first — eager
+plugins are the only ones that cost anything, and there are three of them
+(`anthropic`, `ollama`, `opencode`).
+
+Note the user also confirmed Settings > Connections already provides key
+input, so that surface needs no port — only the wizard needed widening.
+
+### The bar: "it should not feel like the standard OpenClaw dashboard"
+
+User framing 2026-08-27. This is the acceptance criterion for Stage 4, and it
+is about *composition*, not just theme. Concretely, a Psyntient Node should
+present as a research instrument:
+
+- No coding surfaces (worktrees, workboard, skill workshop, tasks)
+- No fleet/operator surfaces (nodes, custodian, infrastructure, logs, debug)
+- Cortex, not Clawd — persona in every avatar slot (done)
+- Projects and Vault as first-class nouns, which OpenClaw has no concept of
+- Keep what genuinely serves research: chat, memory, usage, MCP, connectors
+
+The trap to avoid is the inverse — stripping so much that it becomes a toy.
+Connectors (above) are the example: operator-*looking* but genuinely useful.
+Judge each surface by "does a researcher want this?", not by whether it came
+from OpenClaw.
 
 ### PWA install
 
