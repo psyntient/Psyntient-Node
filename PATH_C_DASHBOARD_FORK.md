@@ -576,6 +576,28 @@ and let the gateway serve it.
 gateway serves the UI same-origin and mints credentials. The auth blocker
 recorded above was an artifact of a sandboxed fresh browser profile only.
 
+## Known debt: hand-edited locale bundles
+
+`Cortex/Open-Claw/ui/CLAUDE.md` states: *"Do not hand-edit non-English locale
+bundles"* — they are generated output, with `ui/src/i18n/locales/en.ts` as the
+only source of truth.
+
+**Every Psyntient string change in this fork edited all 21 locale files**
+(theme name, Projects, onboarding, vault badge, account, suggestions...). It
+works, but it is debt:
+
+- It inflates the OpenClaw-update re-apply surface from ~10 files to ~30.
+- It would conflict with `pnpm ui:i18n:sync` / `ui:i18n:check` if those are
+  ever run.
+
+**Fix when convenient:** keep Psyntient strings in `en.ts` only and let the
+runtime fall back for other locales — verify the fallback path first. Foreign
+translations for a single-user research Node are low value; the 20 extra files
+are pure maintenance cost.
+
+Not urgent: the strings render correctly today, and this fork does not run
+upstream's i18n workflow.
+
 ## Rejected paths (do not retry)
 
 - **tweakcn theme import** — stored per browser profile, never synced to
