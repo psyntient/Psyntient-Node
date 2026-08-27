@@ -340,6 +340,56 @@ Unanswered and load-bearing before any of this ships:
 - **`mcp`** — keep (see 3b). It is the one extension surface that adds real
   research capability without us writing code.
 
+## 7. RESEARCH TASK — "Project = agent instance" (queued, after Stages 2-4)
+
+User framing 2026-08-27, worth quoting because it is the target UX:
+
+> "When I click on New Agent it brings me to a page which offers me the
+> ability to manually edit soul.md and other identity files for the new agent.
+> That is not what we would want. We would want **1 click, 1 new instance,
+> same identity**."
+
+And the payoff: *"a different agent per project... would create a very good
+organization (different context, different chat threads). Kind of analogous to
+Slack channels."*
+
+That analogy is the right one — a Project is a **channel**: its own context,
+its own threads, one shared persona across all of them.
+
+### What is already known (do not re-derive)
+
+- Creating an instance needs **no identity**: `agents add [name]` takes an
+  optional name and `--non-interactive` needs only `--workspace`.
+- Cost is small: **448 KB** disk, **~1.2s** cold pre-model after the
+  `plugins.allow` fix.
+- **The blocker is that identity is workspace-relative.** `SOUL.md`,
+  `AGENTS.md`, `MEMORY.md`, `CAPABILITIES.md` live in the workspace, so a new
+  workspace = a blank agent. OpenClaw's own New Agent page exposes editing
+  those files, which is exactly the flow to avoid.
+
+### The research question
+
+**Can one identity be shared across many agent instances, with only
+memory/context per instance?** Specifically:
+
+1. Does OpenClaw separate *identity* (SOUL/AGENTS/CAPABILITIES) from *state*
+   (MEMORY, sessions, scratch), or is the workspace the only unit?
+2. If not separable: is scaffolding a project workspace from a Cortex template
+   acceptable? Which files should be copied (per-project MEMORY.md is arguably
+   *desirable*) versus shared/symlinked (SOUL.md must never drift)?
+3. Does `memory-core` support per-session or per-project scoping? **Check this
+   first** — if yes, one Cortex with scoped memory delivers the organization
+   benefit with no agent multiplication and no persona problem at all.
+4. What does `agents.create` do with `agents.defaults.workspace` — inherit,
+   or require an override?
+
+### Constraints on any answer
+
+- One click. No identity editor, no naming step, no file authoring.
+- All instances are **Cortex**. Same soul, same capabilities.
+- The Vault-backed Project record (`cortex_projects/<id>/`) stays the durable
+  thing; the agent instance hangs off it, never the reverse.
+
 ## 5. Rules carried over
 
 - Every change to `ui/` grows the re-apply surface on OpenClaw updates. The
