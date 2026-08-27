@@ -234,6 +234,59 @@ stopwatch method used for every other number in this file — open the
 dashboard, send "how are you", time until it renders. That single number
 decides whether Path C fixes speed. It does not block Stage 2.
 
+## ROOT CAUSE: we ported the contaminated state (bisected 2026-08-27)
+
+The user's framing was correct and is the finding: *"The entire point of the
+bisection we did with v2 was to start fresh... so not port over the problem.
+It seems like we did port over the problem."* We did. The fork was pointed at
+the **old state dir**, so it inherited everything V2 existed to escape.
+
+### The bisection, in order
+
+1. **Dashboard code — exonerated.** `git diff eb4eaea39b7..HEAD` is 14 files,
+   all branding (theme block, icons, wordmark, title, manifest, picker card,
+   a 4-line settings migration). Nothing touches chat, sessions, streaming,
+   or gateway RPC. The clone cannot be slower than stock; it *is* stock.
+2. **Config tuning — exonerated.** Aligned all six deltas against the
+   original install (removed `compaction.*`, `heartbeat`, `utilityModel`,
+   `tools.allow`; `tools.profile` minimal -> coding; `sessionObserver` back
+   to default). Result: **no improvement, slightly worse** (7.7-9.2s ->
+   9.5-12.0s). Settings restored afterwards.
+3. **State — confirmed cause.** Same built code, same model, same workspace,
+   same auth; only a fresh state dir:
+
+   | | contaminated state | fresh state |
+   |---|---|---|
+   | `sessions list` | 7.7 - 12.0s | **3.1 - 4.4s** |
+   | startup verification/degraded/conflicting warnings | **57** | **0** |
+
+### What is wrong with the old state
+
+- **1.4 GB single broken plugin**: `npm/projects/openclaw-llama-cpp-provider`,
+  which fails payload verification every start
+  (`missing-openclaw-peer-link`). The original install's whole `npm` dir is
+  **76 KB**.
+- Doctor also reports conflicting plugin install metadata for `brave`.
+- 18 plugins take **6.8s** to load at every gateway start.
+
+### Measurement notes (so these are not re-derived)
+
+- `openclaw sessions list` is a good UI-free proxy: CLI process startup is
+  only **0.11s**, so the wall time is essentially the gateway RPC.
+- Session *count* is not the driver: the fast original store has **47**
+  sessions, the slow one **20**.
+- Transcripts are tiny (4-12 KB) and the session SQLite is 4.3 MB. Not data
+  volume.
+
+### Consequence for the plan
+
+**V2 must be built on a fresh state dir.** Carry over identity only —
+`gateway.auth`, `auth.profiles`, `agents.defaults.model`, `agents.defaults.workspace`
+(and `gateway.mode`, without which the gateway refuses to start). Do **not**
+copy `npm/`, `agents/`, plugin install indexes, or session history. A clean
+config for this is at `~/.psyntient/openclaw-state-clean/openclaw.json`, and
+a clean gateway runs from it on port 18790 for A/B testing.
+
 ## Stage 3 RESULT — measured 2026-08-27. **The UI was never the bottleneck.**
 
 First real run of the forked dashboard against the live Node. Timings taken
