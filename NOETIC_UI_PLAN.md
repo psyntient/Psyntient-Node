@@ -117,6 +117,54 @@ and should not reappear. Respect `prefers-reduced-motion`.
 
 ---
 
+## 3b. Settings — comb-through (decided 2026-08-27)
+
+OpenClaw's Settings is **22 routes in 5 groups** (`SETTINGS_NAVIGATION_GROUPS`
+in `ui/src/app-navigation.ts:204`). Verdicts:
+
+| route | verdict | note |
+|---|---|---|
+| `profile` | **KEEP — and extend** | the natural home for the Psyntient.io account (see below) |
+| `appearance` | **KEEP** | theme + text size; our Psyntient theme lives here |
+| `config` | **KEEP, trim** | general prefs |
+| `notifications` | **KEEP** | real value for a desktop app |
+| `connection` | **KEEP** | gateway URL/token |
+| `model-providers` | **KEEP** | this is the **API key** surface the user requires in Settings |
+| `mcp` | **KEEP (evaluate)** | MCP servers are genuinely useful for a research Node — extra tools without our code |
+| `security` | **KEEP, trim** | |
+| `about` | **KEEP, trim** | Psyntient about box |
+| `custodian` | drop | infra babysitting |
+| `channels` / `communications` | hide | product decision, code stays |
+| `nodes` | drop | remote fleet |
+| `agents` / `ai-agents` | drop | Psyntient runs one agent |
+| `labs` / `automation` | drop | |
+| `approvals` | drop | tied to exec tools we disable |
+| `infrastructure` / `advanced` / `debug` / `logs` | drop | operator surfaces |
+
+**Do NOT build our own usage/token view.** OpenClaw's `usage` page already
+does this. The plan at `~/.claude/plans/swirling-munching-glade.md` (model +
+token display for WebClaw) is **superseded** — do not implement it here.
+
+### Psyntient.io account in Settings (user's idea, worth doing)
+
+Put the real pairing state on the `profile` page as a "Psyntient Account"
+section: paired/unpaired, `node_id`, `context_id`, `paired_at`, and a link out
+to psyntient.io. Data comes from the Stage 2 route
+`/__openclaw__/psyntient/pairing` (GET returns `isPaired`), backed by
+`daemon/pairing.mjs` which reads `~/.psyntient/node.key`.
+
+Constraint from `CLAUDE.md`: pairing and the LLM key stay **decoupled** — a
+bad API key must never surface as an account/pairing problem, and vice versa.
+Two separate sections, two separate error states.
+
+### PWA install
+
+Must live in Settings. No OpenClaw equivalent — this is a genuine port from
+WebClaw (`install-banner.tsx`, `screens/onboarding/install-step.tsx`). Ties
+into the unresolved **PWA origin change** in `PATH_C_DASHBOARD_FORK.md`:
+whatever we build should install from whichever origin ends up serving the
+Interface.
+
 ## 4. Sequencing
 
 1. **Nav prune** — hide the drop-list routes. Cheapest, biggest immediate
