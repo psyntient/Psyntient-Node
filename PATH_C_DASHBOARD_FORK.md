@@ -112,17 +112,38 @@ Non-negotiables carried over from `CLAUDE.md`:
 
 ## Stage 3 — Speed test (checkpoint)
 
-Measure with the same method the user used: stopwatch, real UI, "how are
-you". Compare against the recorded baselines:
-- WebClaw: 6s → 12s → 16s across three attempts, flattening at 15-17s.
-- OpenClaw dashboard, same Gateway/model/session: 13-15s.
-- Backend reply production: **~3.3s**. SSE transit: **1ms**.
+Measure with the same method the user used: stopwatch, real UI.
 
-**Path C is not expected to fix speed.** The 429 rate-limiting and the
-~19K-token prompt floor are backend and hit any UI identically. If the
-dashboard fork also lands at 13-17s, that is the expected result and the
-remaining latency is a separate backend investigation — do not treat it as
-a Path C failure.
+**Test both workloads separately — this distinction is the whole point:**
+- a trivial message ("how are you")
+- a substantial generation (~500-word essay)
+
+Recorded baselines, with their workloads made explicit:
+
+| surface | workload | time |
+|---|---|---|
+| WebClaw | "how are you" (trivial) | 6s → 12s → 16s, flattening 15-17s |
+| OpenClaw dashboard | **500-word essay** | 13-15s |
+| backend reply production | trivial | **~3.3s** |
+| SSE transit (our transport) | — | **1ms** |
+
+**Correction, 2026-08-26 (user):** an earlier version of this file compared
+the dashboard's 13-15s against WebClaw's 15-17s and concluded Path C would
+not fix speed. That comparison was wrong — different workloads. The
+dashboard was writing a 500-word essay; WebClaw was answering "how are
+you." **Path C may well fix the speed issue.**
+
+The supporting evidence points the same way: the backend produces a trivial
+reply in ~3.3s and SSE transit is 1ms, so the ~15s floor WebClaw showed on
+trivial messages was **not** backend cost — it was a frontend artifact
+(consistent with the diagnosed 15s safety-net-refetch path, which is
+exactly the kind of fixed floor that no model or token change could move).
+
+So: do not prejudge this checkpoint in either direction. If the dashboard
+fork answers "how are you" in ~3s, the frontend was the problem and Path C
+solved it. If it also sits at 15s, the remaining latency is backend (429
+rate-limiting, the ~19K-token prompt floor) and becomes a separate
+investigation.
 
 ## Stage 4 — Port the agent surface, in stages
 
@@ -145,14 +166,91 @@ components.
 - **Asset-patching `dist/control-ui` only** — viable for CSS, but cannot add
   or remove screens. Insufficient alone.
 
+## Port inventory — EVERYTHING interface-related must come over
+
+User directive, 2026-08-26: *"make sure you dont forget that we have to
+port over everything to do with the interface."* This is the checklist.
+Nothing here is optional; mark items done as they land, do not silently
+drop any.
+
+### API routes (15) — `web/apps/webclaw/src/routes/api/`
+`artifact` `history` `onboarding` `pairing` `paths` `ping` `projects`
+`provider-key` `send` `sessions` `stream` `transcribe` `usage` `vault`
+`working-memory`
+
+These are server-side handlers that shell out to the daemon or call
+`gatewayRpc`. The Lit app has its own server surface — each of these needs a
+decision: reimplement against the dashboard's own transport, or keep as a
+sidecar. **Do not assume the dashboard already covers them** — `pairing`,
+`vault`, `working-memory`, `projects`, `onboarding`, and `provider-key` are
+Psyntient-specific and have no OpenClaw equivalent.
+
+### Top-level routes (5)
+`__root` (hosts `OnboardingGate`) `connect` `index` `new` `onboarding`
+
+### Onboarding screens (7) — `screens/onboarding/`
+`welcome-step` `api-key-step` `pairing-step` `vault-step` `install-step`
+`onboarding-stepper` `processing-spinner`
+
+### Chat components (17) — `screens/chat/components/`
+`capabilities-dialog` `chat-composer` `chat-header` `chat-message-list`
+`chat-sidebar` `command-session` `context-meter` `gateway-status-message`
+`install-banner` `message-actions-bar` `message-item` `message-status`
+`message-timestamp` `project-detail-dialog` `settings-dialog`
+`suggestion-chips` `vault-badge`
+
+### Chat hooks (12) — `screens/chat/hooks/`
+`use-chat-error-state` `use-chat-history` `use-chat-measurements`
+`use-chat-mobile` `use-chat-pending-send` `use-chat-redirect`
+`use-chat-sessions` `use-chat-settings` `use-chat-stream`
+`use-delete-session` `use-rename-session` `use-session-shortcuts`
+
+### Shared components (~35) — `components/`
+`elf-avatar` (the brand mascot — animated idle/blink/talk + gold sparkles,
+**must survive the port**), `attachment-button` `attachment-preview`
+`boot-progress-bar` `export-menu`, the `prompt-kit/` set (`chat-container`
+`code-block` `markdown` `message` `prompt-input` `scroll-button`
+`streaming-bubble` `text-shimmer` `thinking` `tool` `typing-indicator`),
+and the `ui/` primitives (`alert-dialog` `autocomplete` `button`
+`collapsible` `command` `dialog` `input` `menu` `preview-card` `scroll-area`
+`switch` `tabs` `tooltip`).
+
+The `ui/` primitives and `prompt-kit/` likely have Lit-side equivalents
+already in the dashboard — check before rewriting. `elf-avatar` does not.
+
+### PWA / static — `web/apps/webclaw/public/`
+`manifest.json` `sw.js` `favicon.svg` `brand/` `cover.jpg` `robots.txt`
+
+`sw.js` carries a hard-won rule: **never cache the HTML document
+cache-first**; only content-hashed `/assets/*` are safe cache-first, and
+bump `CACHE_NAME` on any change.
+
+### Daemon modules (16) — `daemon/`, unchanged by the port
+`device-name` `heartbeat-control` `heartbeat-loop` `interface-control`
+`launch` `onboarding` `open-browser` `openclaw-cli` `openclaw-control`
+`pairing` `provider-test` `providers` `vault` `voice-transcription-control`
+`voice-transcription` `working-memory`
+
+These are already correct and verified against the real production API.
+The port is a **UI-layer port** — do not rewrite these. But every one of
+them has a caller on the interface side that must be re-established.
+
+### Features that must not be lost
+- Voice-to-text (`transcribe` route + `voice-transcription*.mjs`)
+- Streaming text appearance / highlight
+- Working-memory sync on turn completion (wired via `displayMessages`
+  effect + 20s idle poll — **not** the SSE `final` event, which was tested
+  and confirmed unreliable here)
+- Model + token usage display (see the pending plan at
+  `~/.claude/plans/swirling-munching-glade.md`)
+- Sessions→Projects rename, Vault badge, Settings dialog
+
 ## Costs accepted going in
 
 - You own a full OpenClaw monorepo checkout as a build dependency — **more**
   OpenClaw code than today, not less.
-- WebClaw work that does **not** port: 7 onboarding components, 22 chat
-  components, 31 shared components, 15 API routes (artifact, history,
-  onboarding, pairing, provider-key, send, sessions, stream, transcribe,
-  usage, vault, working-memory, projects, paths, ping).
+- **Lit, not React.** No WebClaw component ports as-is; every custom view in
+  the inventory above is a rewrite, not a copy.
 
 ## Doc conflict to resolve
 
