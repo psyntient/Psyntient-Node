@@ -131,6 +131,67 @@ Steps:
 
 **Do not ship WebClaw's default look or OpenClaw's Claw red.**
 
+## Stage 2 — Transport decision (settled 2026-08-27)
+
+The Control UI is a **static SPA served by the gateway** — unlike WebClaw,
+which was full-stack and could spawn `daemon/*.mjs` from its own server
+routes. So the first Stage 2 question was how the SPA reaches the daemon at
+all. Settled as follows.
+
+**Provider key: no transport needed.** OpenClaw already ships this natively —
+`ui/src/pages/model-setup/` with its own `first-run.ts` gate (structurally
+the same job as WebClaw's `OnboardingGate`). Extend/reskin it rather than
+porting ours. `daemon/providers.mjs` and `/api/provider-key` are not needed
+for the UI path.
+
+**Pairing / Vault / onboarding marker: gateway HTTP routes.** These are
+Psyntient-only with no OpenClaw equivalent. The logic lives at
+`Noetic_Interface/gateway-plugin/index.js` — **outside** the OpenClaw tree,
+so an update cannot touch it — and calls the unchanged daemon modules
+directly (`pairing.mjs`, `vault.mjs`, `onboarding.mjs`). It runs inside the
+gateway's own Node process: no subprocess spawn, no second port, no CORS,
+same-origin with the SPA.
+
+### Two hard-won facts about gateway routes
+
+1. **The `/__openclaw__/` prefix is mandatory.** The gateway answers any
+   ordinary path with the SPA's `index.html` before plugin routes are
+   consulted — silently, no warning, no diagnostic. Verified by comparison:
+   the bundled canvas plugin's `/__openclaw__/a2ui` returns `401
+   application/json`, while an unprefixed path returns SPA HTML. Do not
+   "tidy" this prefix away.
+2. **`plugins.load.paths` does not work for this.** Tried first, as the
+   intended mechanism. The plugin is discovered, listed as enabled, and its
+   `register()` genuinely runs in the gateway process with
+   `registrationMode: "full"` — confirmed by probe — and `registerHttpRoute`
+   accepts the routes without throwing. They still never reach the registry
+   the gateway serves from, and the plugin never appears in the gateway's
+   active-plugin list. No diagnostic is emitted. Ruled out along the way:
+   ESM-vs-CJS export shape (`resolvePluginModuleExport` handles both),
+   missing manifest/`configSchema` (fixed, config validates), invalid `auth`
+   (`"gateway"` and `"plugin"` are the only valid values and both were
+   tried), path normalization, and the peer-link verification gate (applies
+   only to plugins declaring an `openclaw` peerDependency).
+
+   **Do not re-attempt `plugins.load.paths` for HTTP routes without new
+   information.** A useful false signal to ignore: `plugins list --json`
+   reports `httpRoutes: 0` for *every* plugin including bundled ones, because
+   the CLI pass does not activate routes. That number says nothing.
+
+### The shim
+
+`Cortex/Open-Claw/src/gateway/psyntient-routes.ts` — **the only Psyntient
+code inside the OpenClaw tree.** It imports the external plugin module and
+pushes the route objects it produces into the serving registry, so all the
+existing dispatch, auth, and scope machinery still applies. Called from
+`server-runtime-state.ts`'s plugin request handler, before the
+empty-registry short circuit. Idempotent, and never throws — a missing
+Interface plugin degrades to "those routes 404", never a dead gateway.
+
+**This grows the re-apply surface from 8 files to 10** (`psyntient-routes.ts`
+plus the `server-runtime-state.ts` call site). Keep it thin: new endpoints
+belong in the external plugin module, not here.
+
 ## Stage 2 — Port setup / auth
 
 Port to the Lit app, in this order: provider-key gate → pairing → vault

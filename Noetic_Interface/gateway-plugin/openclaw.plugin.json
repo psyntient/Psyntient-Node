@@ -1,0 +1,14 @@
+{
+  "id": "psyntient",
+  "name": "Psyntient",
+  "description": "Noetic Interface backend routes: onboarding gate, pairing, and Vault. Bridges the gateway-served SPA to the Psyntient daemon modules.",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
