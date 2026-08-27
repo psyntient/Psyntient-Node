@@ -234,7 +234,69 @@ stopwatch method used for every other number in this file — open the
 dashboard, send "how are you", time until it renders. That single number
 decides whether Path C fixes speed. It does not block Stage 2.
 
-## ROOT CAUSE: we ported the contaminated state (bisected 2026-08-27)
+## ACTUAL ROOT CAUSE: plugin tool construction, ~22s per cold agent run
+
+Found 2026-08-27 from the runtime's own trace, which had been in the log all
+along. User observation that cracked it: *"it takes like 30 seconds to
+respond... but the UI states it took 3 seconds."* The UI was honest — it
+times the model call. The wait sits in front of it, invisible to the UI.
+
+Measured on a **clean** state dir (so contamination is ruled out):
+
+```
+chat.send        11:15:57.010
+model request    11:16:24.014   <- 27.0s pre-model
+model responded  11:16:27.223   <-  3.2s inference
+```
+
+`[trace:embedded-run] prep stages` breaks that down exactly:
+
+| stage | ms |
+|---|---|
+| workspace-sandbox | 102 |
+| skills | 2 |
+| **core-plugin-tools** | **22008** |
+| bootstrap-context | 781 |
+| bundle-tools | 63 |
+| system-prompt | 53 |
+| session-resource-loader | 32 |
+| agent-session | 16 |
+| stream-setup | 120 |
+
+and within that: `openclaw-tools:plugin-tools: 21936ms`. Every other
+sub-stage is 0-21ms.
+
+**It is module loading, not factory execution.** `shouldWarnPluginToolFactoryTimings`
+warns at `PLUGIN_TOOL_FACTORY_WARN_TOTAL_MS = 5_000`
+(`src/plugins/tools.ts:81`), and 21.9s produced **no warning** — so
+`factoryTimings` was empty and the cost is the lazy dynamic import of the
+plugin modules, proportional to how many plugins are active. Consistent with
+the second turn in the same session costing only 8.8s pre-model: partially
+warmed.
+
+**Fix under test:** `plugins.allow` restricted to what a chat Node needs.
+Gateway then reports `2 plugins: memory-core, openrouter` instead of 18.
+
+### What this corrects
+
+Several earlier conclusions in this file were wrong, and are superseded:
+
+- **Not the UI.** Path C's fork is branding-only and cannot affect this.
+- **Not config tuning.** compaction/tools.profile/heartbeat/utilityModel/
+  sessionObserver were all aligned to the original install with no
+  improvement.
+- **Not UI polling contention, not the GitHub/PR calls.** Both real
+  observations, neither causal.
+- **Not state contamination.** That *is* real and worth fixing — it makes
+  RPCs 10-20x slower (below) — but the 27s pre-model delay reproduced on a
+  completely clean state dir.
+
+**Lesson for next time: read `[trace:embedded-run]` first.** The runtime
+already emits a per-stage breakdown of exactly where a turn's time goes. It
+would have pointed at this immediately instead of after a long detour through
+UI, config, and state.
+
+## Secondary (real, but not the cause): we ported the contaminated state
 
 The user's framing was correct and is the finding: *"The entire point of the
 bisection we did with v2 was to start fresh... so not port over the problem.
