@@ -191,6 +191,36 @@ record. **Do not assume it exists — check first:**
 `dig +short archive.psyntient.io` (or `nslookup`) before doing anything
 else in this phase.
 
+**DNS UPDATE, checked 2026-08-27: the record now exists, but not in the
+shape this plan assumed.** `dig archive.psyntient.io` returns
+`172.67.221.99` / `104.21.67.110` — **Cloudflare edge IPs, not
+`147.182.188.20`**. The record is proxied (orange cloud): responses carry
+`server: cloudflare` and a `cf-ray` header. `https://archive.psyntient.io/api/v1/meta`
+returns **HTTP 521** ("Web Server Is Down"), which is Cloudflare saying it
+cannot reach the origin — and it can't: ports 80, 443 and 8000 are all
+closed/filtered on the droplet, because the API is still bound to
+`127.0.0.1:8000` and no reverse proxy is installed yet. So DNS is no longer
+the blocker; the origin simply isn't serving.
+
+**This changes step 2's cert plan.** With a proxied record, Cloudflare
+terminates TLS at the edge, so Caddy's automatic Let's Encrypt (HTTP-01
+through the proxy) is the fragile option, not the simple one. Use a
+**Cloudflare Origin Certificate** on the droplet with Cloudflare's SSL/TLS
+mode set to **Full (strict)**: no public ACME dependency, long-lived cert,
+and the CF→origin hop stays encrypted. Do **not** leave the mode on
+"Flexible" — that makes the CF→origin hop plain HTTP and will fight Caddy's
+HTTPS redirect.
+
+**Blocked on credentials, not on DNS:** `ssh root@147.182.188.20` refuses
+publickey and needs the password, which was deliberately never written down.
+Ask the user for it before resuming.
+
+**Also confirmed ready:** this Node is genuinely paired
+(`~/.psyntient/node.key`, `node_id 45d970d5-…`, `base_url https://psyntient.io`),
+and `https://psyntient.io` itself returns 200 — so step 4's real proof (call
+the Archive API with this Node's own token) can run the moment the origin
+serves.
+
 **Resume steps once the DNS record resolves:**
 1. Confirm it resolves to `147.182.188.20`.
 2. Install Caddy on the droplet (already pre-approved by the user —
