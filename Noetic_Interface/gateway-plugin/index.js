@@ -292,11 +292,12 @@ export default {
             return sendJson(res, 200, { ok: true, archived: projectId });
           }
 
-          if (action === "remove" || action === "delete") {
+          if (action === "remove") {
             // eraseProjectWorkingCopy() refuses unless a real sync has happened
             // (it checks .project.json's lastSyncedAt, which only
-            // syncProjectToVault sets). That guard protects unsaved research,
-            // so surface it as a prompt to sync rather than a raw failure.
+            // syncProjectToVault sets). Here the Vault copy IS the safety net
+            // that makes "remove" recoverable, so an unsynced project has no
+            // net -- surface the refusal as a prompt to sync, not a raw error.
             try {
               wm.eraseProjectWorkingCopy(projectId);
             } catch (err) {
@@ -306,14 +307,22 @@ export default {
                 error: err instanceof Error ? err.message : String(err),
               });
             }
-            if (action === "delete") {
-              fs.rmSync(path.join(wm.paths.CORTEX_PROJECTS_DIR, projectId), {
-                recursive: true,
-                force: true,
-              });
-              deleteVaultProject(projectId);
-            }
-            return sendJson(res, 200, { ok: true, [action + "d"]: projectId });
+            return sendJson(res, 200, { ok: true, removed: projectId });
+          }
+
+          if (action === "delete") {
+            // Deliberately NOT routed through eraseProjectWorkingCopy(): its
+            // sync guard exists to keep a Vault copy as the recovery path, and
+            // this action deletes that copy too. Honouring it here would answer
+            // "delete everything permanently" with "save it to the Vault
+            // first" -- the opposite of what was asked, and it would leave the
+            // Vault copy behind. The UI's typed-name confirmation is the gate.
+            fs.rmSync(path.join(wm.paths.CORTEX_PROJECTS_DIR, projectId), {
+              recursive: true,
+              force: true,
+            });
+            deleteVaultProject(projectId);
+            return sendJson(res, 200, { ok: true, deleted: projectId });
           }
 
           return sendJson(res, 400, { ok: false, error: "unknown action" });
