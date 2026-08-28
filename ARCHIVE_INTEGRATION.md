@@ -208,9 +208,11 @@ missing the export half:
    and the specific thing labs are promised. This is the biggest gap, and it
    is not only a lab problem: `archive_pin` (Q3) needs an Edition identifier
    to record.
-2. **No bulk/streaming export.** Paginating a training corpus through a query
-   endpoint is not a viable draw. Labs need resumable, checksummed, streamed
-   export with a stable ordering.
+2. ~~**No bulk/streaming export.**~~ **Superseded** — see the Git section
+   above. Git at a tag already provides resumable, checksummed, deterministic
+   bulk transfer, so no streaming endpoint is needed. What is needed instead is
+   a signed snapshot download for the *current* Edition, so paying bulk
+   consumers do not have to be provisioned GitHub access.
 3. **No consent snapshot, and no revocation feed.** Consent is revocable and
    packets are append-only, so a batch drawn today is a claim about consent
    *at draw time*. A lab needs (a) that snapshot recorded with the batch and
@@ -227,6 +229,129 @@ missing the export half:
 **Recommended order**, since (1) unblocks the most: Editions endpoint →
 manifest in `/api/v1/meta` → scoped tokens → bulk export → revocation feed.
 The first two also serve the researcher Node, so they are not lab-only work.
+
+## Git or API for Edition access? — split by access mode, not by edition age
+
+Decided 2026-08-27 after establishing that only the *current* Edition is live
+on the droplet; previous Editions exist as tags in the (currently private)
+`psyntient/The-Noetic-Archive` repo. Confirmed: the `psyntient` org reports 0
+public repos today.
+
+**Use both, for different operations:**
+
+> **Git is the distribution and citation format for frozen Editions. The API is
+> the query surface over the current one.**
+
+They are not competing answers, and neither can do the other's job:
+
+- **Git cannot answer a question.** The researcher case is "what does the
+  Archive say about open awareness?" — that is search and per-record lookup.
+  Cloning a corpus to answer it is absurd, and gets worse as packets (neural
+  recordings) grow. Git's only access mode is "all of it."
+- **The API should not carry bulk.** Git already does resumable, checksummed,
+  deterministic, tag-addressable bulk transfer, for free. **This corrects gap
+  2 below** — a streaming export endpoint was over-engineering. The Edition
+  repo already is the export mechanism.
+
+**The Node never clones.** It queries, and pins citations as
+`{edition version, git tag, packet ids, query, timestamp}`. The git tag makes
+the pin *resolvable later by a human or a lab* — the Node itself never fetches
+it. Git is the citation namespace; the API is the access path. A paper cites a
+DOI without hosting the journal.
+
+For this to work, `/api/v1/meta` **must** expose the current Edition's git ref.
+Without it a pin is unresolvable, and that is the whole point of pinning.
+
+### Mapping the free/paid split onto this
+
+Intended model: historical Editions free, current Edition gated on
+psyntient.io subscription status.
+
+**Gate at the API, not at GitHub.** Publishing historical Editions to a public
+repo is the right move and needs no gate at all — free means no mechanism.
+Gating the *current* Edition through GitHub ACLs would be the mistake:
+
+- It requires every subscriber to have a GitHub account and be provisioned as
+  a collaborator — a miserable onboarding step for a non-technical
+  consciousness researcher, and a fragile dependency on a third party's
+  permission system.
+- Subscription lapse cannot un-clone a private repo. Git is distributed by
+  design; there is no revocation once fetched.
+- The API gate **already exists and already means the right thing**:
+  `app/auth.py` → psyntient.io, which is where subscription status lives.
+
+So: public repo for historical Editions; the API for the current one; and for
+paying bulk consumers, serve the current Edition as a signed, time-limited
+snapshot download from the API rather than provisioning GitHub access. That
+reuses the auth already built and keeps GitHub out of the entitlement path.
+
+### The consent problem this creates — raise before publishing anything
+
+Published Editions are immutable and, once public, distributed. A contributor
+who later withdraws **cannot** be removed from an Edition someone has already
+cloned. That is in direct tension with the site's current wording:
+
+> "Every contribution is voluntary and revocable." — psyntient.io/archive
+
+Both can be true only if "revocable" is scoped precisely: **withdrawal removes
+a contributor from future Editions; it cannot retract an Edition already
+published.** That is a normal, defensible position — most data repositories
+work this way — but it has to be stated at *consent time*, not discovered
+afterwards, and the site language should say so. This is worth settling before
+the first public Edition ships, because it cannot be fixed retroactively.
+
+## How do developers authenticate? — by account, not by Node
+
+The original plan was that every developer installs a Node and routes through
+it. **Recommend against.** It breaks for exactly the consumers that matter
+commercially, and it buys no safety.
+
+The confusion comes from one word covering two very different resources:
+
+| resource | where it lives | can anything but a Node reach it? |
+|---|---|---|
+| **a user's Vault** | that user's machine | **No.** Nothing else can. |
+| **the Archive** | a server | Yes. Nothing about it is local. |
+
+Once separated, the answer is forced:
+
+- **Vault access → Node-mediated, always.** Not policy, physics: the Vault is
+  on the user's disk and the Node is the only thing that can reach it. Scoped,
+  revocable tokens issued by that Node — exactly what the site describes.
+- **Archive access → account-mediated, no Node required.** A server-side app
+  with 100k users cannot run 100k Nodes. An AI lab drawing training data has no
+  user and no Vault in the transaction at all; requiring a Node there is pure
+  ceremony that protects nothing.
+
+**The Node is the first-party consumer of the Archive API, not a toll booth on
+it.** That is also the more honest product story: the Node earns its place by
+making a user's *own* data sovereign and usable, not by being mandatory
+middleware for reading a database.
+
+### The implementation is small, because the pattern already exists
+
+`app/auth.py` already resolves a credential by calling psyntient.io
+(`POST /api/public/nodes/verify-token`, `X-Internal-Service-Key`). Generalise
+that to resolve **any** Psyntient credential — node token or developer key —
+returning `{ valid, subject, plan, scopes }`. The Archive then stops caring
+which kind it holds, and psyntient.io stays the single source of entitlement
+truth, where subscriptions already live. Revocation works identically for both.
+
+| credential | issued to | typical consumer | Vault reach |
+|---|---|---|---|
+| node token (`node.key`) | a paired Node | Cortex, the researcher's own Node | that Node's Vault |
+| developer API key | a psyntient.io developer account | server-side app, CI, lab pipeline | **none** |
+| scoped token | issued *by* a Node to an app | an app acting for one user | that user's Vault, scoped |
+
+An app needing both — user Vault data *and* Archive context — carries both
+credentials. That is correct, not redundant: it means an app can never use its
+own Archive entitlement to reach a Vault, and never use a user's consent to
+bulk-draw the Archive. The separation is the safety property.
+
+**Site wording to revisit:** "The Node owns the connections to the user's
+Neural Vault and, with consent, the Noetic Archive — so you never have to"
+currently reads as Node-mandatory for Archive access. True for Vault, too
+strong for Archive.
 
 ## Blocked on
 
