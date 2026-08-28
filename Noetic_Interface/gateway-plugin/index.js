@@ -331,6 +331,97 @@ export default {
       }),
     });
 
+    // --- Archive sync -----------------------------------------------------
+    // GET  -> { autoSyncAll, projects: [...], active }
+    // POST -> { action:"set-global", enabled }
+    //         { action:"set-project", projectId, enabled }   enabled null = inherit
+    //         { action:"run", projectId }                    starts, returns immediately
+    //
+    // A run is started and then polled rather than awaited: submitting a
+    // backlog can take minutes, and holding an HTTP request open for it gives
+    // the UI nothing to show and dies on the first proxy timeout. Progress
+    // lives in `activeRun` here in the gateway process, which is the same
+    // process doing the work.
+    let activeRun = null;
+
+    const vaultProjectDir = async (projectId) => {
+      const vault = await daemonModule("vault.mjs");
+      const device = await daemonModule("device-name.mjs");
+      return path.join(vault.getVaultRoot(), "Devices", device.deviceName(), projectId);
+    };
+
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/sync",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const sync = await daemonModule("archive-sync.mjs");
+
+        if (req.method === "GET") {
+          const ledger = await daemonModule("vault-ledger.mjs");
+          const settings = sync.readSettings();
+          const projects = ledger.readLedger().projects.map((p) => ({
+            projectId: p.projectId,
+            title: p.title,
+            dataTypes: p.dataTypes,
+            eligible: p.declaredEligible,
+            contributable: p.contributable,
+            packets: p.sessions.packets,
+            // Both the explicit choice and what it resolves to: the UI has to
+            // show "inheriting on" differently from "explicitly on", or the
+            // global toggle looks like it did nothing.
+            autoSync: p.autoSync ?? null,
+            autoSyncEffective: sync.resolveAutoSync(p, settings),
+          }));
+          return sendJson(res, 200, { ok: true, ...settings, projects, active: activeRun });
+        }
+
+        if (req.method === "POST") {
+          const body = await readJsonBody(req);
+          if (body.action === "set-global") {
+            return sendJson(res, 200, {
+              ok: true,
+              ...sync.writeSettings({ autoSyncAll: body.enabled === true }),
+            });
+          }
+          if (body.action === "set-project") {
+            const dir = await vaultProjectDir(String(body.projectId ?? ""));
+            const enabled = body.enabled === null || body.enabled === undefined ? null : body.enabled === true;
+            return sendJson(res, 200, { ok: true, ...sync.setProjectAutoSync(dir, enabled) });
+          }
+          if (body.action === "run") {
+            if (activeRun && !activeRun.done) {
+              return sendJson(res, 409, { ok: false, error: "A sync is already running." });
+            }
+            const projectId = String(body.projectId ?? "");
+            const dir = await vaultProjectDir(projectId);
+            activeRun = { projectId, index: 0, total: 0, done: false, result: null, error: null };
+            // Fire-and-forget on purpose; the client polls GET for progress.
+            void sync
+              .syncProject(dir, {
+                onProgress: (p) => {
+                  activeRun.index = p.index + 1;
+                  activeRun.total = p.total;
+                  activeRun.sessionId = p.sessionId;
+                },
+              })
+              .then((result) => {
+                activeRun = { ...activeRun, done: true, result };
+              })
+              .catch((err) => {
+                activeRun = {
+                  ...activeRun,
+                  done: true,
+                  error: err instanceof Error ? err.message : String(err),
+                };
+              });
+            return sendJson(res, 202, { ok: true, started: projectId });
+          }
+          return sendJson(res, 400, { ok: false, error: "unknown action" });
+        }
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }),
+    });
+
     // --- Projects ---------------------------------------------------------
     // GET  -> { projects: [{projectId,title,createdAt,lastSyncedAt}], defaultId }
     // POST -> { title }                       create

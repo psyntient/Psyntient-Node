@@ -156,6 +156,13 @@ export function scanVault() {
           captures: sessions.captures,
           path: path.relative(vaultRoot, projectDir),
           lastSyncedAt: meta.lastSyncedAt ?? null,
+          // Tri-state, passed through unresolved: null means "inherit the
+          // Node default", which the caller resolves. Collapsing it here would
+          // lose the difference between "not decided" and "explicitly off".
+          autoSync: meta.autoSync ?? null,
+          // Queue receipts, so a UI can show what was submitted and when
+          // without re-reading every .project.json.
+          submissions: (meta.submissions ?? []).length,
         });
       }
     }
