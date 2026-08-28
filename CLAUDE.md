@@ -54,6 +54,29 @@ agents.defaults.workspace = /Users/woodleybrown/Psyntient_Node/Cortex/Cortex_Age
 
 If OpenClaw resets defaults to `~/.openclaw/workspace`, fix it back.
 
+## Build profiles: `gatewayWatch` is not a substitute for `full`
+
+`node scripts/build-all.mjs gatewayWatch` takes ~22s and `full` takes ~20min,
+which makes the fast one very tempting. It is only safe for **gateway-only**
+edits.
+
+`gatewayWatch` runs a single `tsdown` step. `full` runs **three** —
+`tsdown-ai`, `tsdown-packages`, `tsdown-unified` — plus
+`plugins:assets:build` / `plugins:assets:copy`. So anything touching the agent
+runtime, providers, plugins or tools is not rebuilt by `gatewayWatch`, and the
+result is a freshly-built gateway running against a stale AI runtime.
+
+**The failure mode is nasty because it looks like a feature bug, not a build
+problem:** ordinary chat keeps working while *every* tool call dies with
+`FailoverError: Provider finish_reason: error` after three
+`[empty-error-retry]` attempts. Nothing in the error mentions the build. It
+cost a long bisection (schema shape, tool count, model, plugin allowlist, our
+plugin vs a bundled one) before the profile difference was the answer.
+
+Rule of thumb: **if the change is not confined to `src/gateway/`, use `full`.**
+And after either profile, re-run `node scripts/ui.js build` — `gatewayWatch`
+wipes `dist/control-ui/` and does not repopulate it.
+
 ## Safe OpenClaw update procedure
 
 1. Stop the Gateway service.
