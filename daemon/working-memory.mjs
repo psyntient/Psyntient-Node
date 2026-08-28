@@ -236,6 +236,11 @@ export function syncProjectToVault(projectId) {
   }
   copyDirContentsInto(path.join(workDir, "logs"), path.join(vaultDir, "sessions"));
   copyDirContentsInto(path.join(workDir, "scratch"), path.join(vaultDir, "exports"));
+  // Archive citations -> analyses/. This is what finally gives the Vault's
+  // `analyses/` directory a writer; it was scaffolded from Phase H onward with
+  // nothing producing into it. A pinned citation is an analysis input, so the
+  // mapping is the semantically right one rather than a convenient spare slot.
+  copyDirContentsInto(path.join(workDir, "citations"), path.join(vaultDir, "analyses"));
 
   const projectJsonPath = path.join(vaultDir, ".project.json");
   const projectJson = fs.existsSync(projectJsonPath)
@@ -291,6 +296,43 @@ export function getProjectStatus(projectId) {
 // create/rename/delete exists (those are research-agent-skill actions
 // during a conversation) -- this and getProjectDetail() below are read-only
 // listing/viewing support for the Interface's Projects sidebar section.
+/**
+ * Record what an Archive query actually returned, into the project.
+ *
+ * This is the half that makes "traverse, never mirror" survivable. The Node
+ * does not keep a copy of the Archive, so without a pin an analysis cites
+ * records it can no longer show -- and the Archive is append-only with
+ * revocable consent, so "just query it again" is not guaranteed to return the
+ * same thing. Pinning writes down the Edition, the query, and the records the
+ * analysis actually rested on: a bibliography, not a photocopy of the library.
+ *
+ * Append-only, one file per pin, so a later pin never rewrites an earlier
+ * claim.
+ */
+export function pinCitation(projectId, { edition, query, records }) {
+  assertSafeId(projectId, "projectId");
+  const workDir = workingProjectDir(projectId);
+  if (!fs.existsSync(workDir)) {
+    throw new Error(`No working copy for project "${projectId}" in Working_Memory`);
+  }
+  const dir = path.join(workDir, "citations");
+  fs.mkdirSync(dir, { recursive: true });
+
+  const pinnedAt = new Date().toISOString();
+  const pin = {
+    pinnedAt,
+    // Edition is the citation anchor: psyntient.io's reproducibility claim is
+    // that any result can be re-checked against the exact Edition that
+    // produced it, so a pin without one is not a citation.
+    edition,
+    query: query ?? null,
+    records,
+  };
+  const file = path.join(dir, `${pinnedAt.replace(/[:.]/g, "-")}.json`);
+  fs.writeFileSync(file, JSON.stringify(pin, null, 2) + "\n");
+  return { ok: true, file, count: records.length, edition };
+}
+
 export function listProjects() {
   if (!fs.existsSync(CORTEX_PROJECTS_DIR)) return [];
   return fs

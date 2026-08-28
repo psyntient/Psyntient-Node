@@ -353,6 +353,80 @@ Neural Vault and, with consent, the Noetic Archive — so you never have to"
 currently reads as Node-mandatory for Archive access. True for Vault, too
 strong for Archive.
 
+## What a Project contains, and which Projects can contribute to the Archive
+
+### Chat is NOT in the Project today — verified, and it matters
+
+`Working_Memory/` has two sibling trees, and threads live in neither's child:
+
+```
+Working_Memory/
+├── chat_context/<thread_id>/      messages.jsonl, .meta.json   <- the chat
+└── cortex_projects/<project_id>/  notes.md, scratch/, logs/,
+                                   citations/                   <- the Project
+```
+
+The only link is the session `category` field, which equals the project id.
+Nothing physically nests a thread under a Project, and `syncProjectToVault()`
+copies `notes.md`, `logs/`, `scratch/` and `citations/` — **not transcripts**.
+So a Project's chats are associated with it, not contained by it.
+
+That is fine for scoping the sidebar. It is a real gap the moment a Project
+becomes the unit of Archive contribution, because in a Psyntient Node the
+**first-person report is plausibly written in chat** — the participant
+describing the experience to Cortex. That is the phenomenological half of an
+Observation Packet, and it currently lives outside the thing being contributed.
+
+### The eligibility gate already exists: `modality`
+
+`createProject({ projectId, title, modality })` already writes a `modality` tag
+into `.project.json`, and `skills/research-agent/SKILL.md` already calls it
+"the single source of truth that would later gate Archive-eligibility and
+Observation Packet schema selection." It does not need inventing — it needs
+using. **Every Project created through the Projects UI has `modality: null`,
+because the create route never asks.**
+
+The rule follows from what the Archive admits:
+
+> "an immutable, time-stamped container that holds the neural or physiological
+> record alongside the first-person report of the same window" ... "Packets
+> without a report are admitted as pure neural evidence ... but a new archetype
+> is never defined from neural data alone." — psyntient.io/archive
+
+So the **recording is required and the report is optional**, not the reverse:
+
+| `modality` | Archive-eligible? |
+|---|---|
+| `eeg`, `fmri`, `fnirs`, `meg`, `ecog`, `bci`, `hrv`, `eda`, `eye-tracking`, `motion-capture` | yes — potentially, once a packet is assembled |
+| `self-report-only` | **no** — no instrument record, so it can never form a packet |
+| `null` (literature review, planning, general chat, everything the UI creates today) | **no** |
+
+Most Projects will be ineligible, and that is the normal case, not a failure.
+A thesis-chapter Project or a planning Project has nothing the Archive accepts.
+The UI should therefore treat "contribute" as absent for those Projects rather
+than present-and-erroring.
+
+### Never auto-push, and never ship the transcript
+
+Two rules, the second easy to miss:
+
+1. **Contribution is per-act and explicitly consented.** No background upload.
+   An auto-contribute setting may exist, but it is off by default and is an
+   opt-in the user sets knowingly — not a default that has to be discovered
+   and disabled. This matches SOUL.md ("always with the user's explicit
+   consent") and the Archive page ("Every contribution is voluntary").
+2. **A chat transcript is never the report.** A thread holds everything the
+   user said in that Project — unrelated tangents, personal context, other
+   people's names, half-formed thoughts. Dumping it as the "first-person
+   report" would leak all of that into an immutable, published, unretractable
+   Edition. The report must be a **deliberately authored or selected artifact**
+   that the user sees in full before consenting. Cortex may help draft it from
+   the conversation; the transcript itself must not be the payload.
+
+That second rule is why the gap in the first section matters but must not be
+closed by simply syncing transcripts into the Project. The fix is an explicit
+report artifact, not a wider net.
+
 ## Blocked on
 
 SSH to the droplet. `ssh root@147.182.188.20` refuses publickey; a public key
