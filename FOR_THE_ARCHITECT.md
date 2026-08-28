@@ -128,6 +128,64 @@ would let clients behave.
 
 ---
 
+## 3b. Ship an archetype index as a markdown artifact per Edition
+
+**Ask: `release_edition` should emit `ARCHETYPES.md` alongside `manifest.json`
+and `INTEGRITY.txt`** — one entry per archetype in the Edition, containing:
+
+```markdown
+### Grand Vastness Awe
+- id: NA-0012-grand-vastness-awe
+- confidence: tentative (1 exemplar)
+- family: NA-0026-numinous-encounter        # omit when there is no genus
+
+A breath-catching response to something immense — a landscape, a starry sky,
+the scale of time or nature. The self feels small but not diminished...
+```
+
+### Why this shape
+
+It makes **coarse-to-fine retrieval** possible, which is what a growing
+taxonomy needs. The Node reasons over this one file to shortlist candidates,
+then pulls full records for only those ids, and narrows again if needed. It
+never has to hold the whole Archive to answer "what is the thing I
+experienced?"
+
+**Markdown rather than JSON, deliberately.** The consumer is a language model,
+and markdown carries the same content in meaningfully fewer tokens than JSON
+(no repeated keys, braces or quotes) — measured at ~10.0 KB slim JSON versus
+~7 KB markdown for the current 26 archetypes. That saving lands on every
+search, not just once.
+
+**Include the `id`.** Title and description alone force the Node to map names
+back to ids before it can fetch full records, and names are exactly what a
+living taxonomy renames. The id makes the second stage exact.
+
+**Include confidence and family.** Both are one line and both are things a
+researcher filters on — "which of these are actually well supported", "what
+else is in this family" — and having them in the cheap stage avoids fetching
+full records just to discard them.
+
+### Why this is the right unit to version
+
+It is derived from the Edition, so it should be *generated* by `release.py`
+rather than maintained, ship inside `editions/<edition_id>/`, and be covered by
+`INTEGRITY.txt` like everything else. Then a Node can cache it keyed to
+`edition_id` and know exactly when the cache is stale — which matters because
+archetypes get renamed and merged between Editions, and a stale index would
+produce confident answers naming archetypes that no longer exist.
+
+### The honest ceiling
+
+This does not remove the need for server-side semantic search; it defers it.
+At ~385 bytes per archetype, this artifact stays context-sized to roughly
+500–1,000 archetypes. Beyond that even titles and descriptions stop fitting,
+and the answer becomes embeddings in the API — which the whitepaper already
+reserves space for in Layer 4 (`manifold_coordinates`, `dimensions`, "largely
+empty in Edition 002"). This design buys one to two orders of magnitude of
+headroom cheaply, and should be understood as the bridge rather than the
+destination.
+
 ## 4. Concrete asks, in priority order
 
 1. **Ship the complete edition directory.** `release.py` already produces
@@ -142,8 +200,11 @@ would let clients behave.
    cannot resolve that citation back to an exact Git tag. Reproducibility
    *against the exact Edition that produced a claim* is the Archive's own
    stated property, and it currently cannot be exercised from outside.
-3. **Add `pipeline_version` per modality** (section 2).
-4. **Idempotency key on ingest** (section 3).
+3. **Emit `ARCHETYPES.md` per Edition** (section 3b) — cheapest of these to
+   add, and it unblocks natural-language search over a taxonomy whose names
+   researchers cannot be expected to know.
+4. **Add `pipeline_version` per modality** (section 2).
+5. **Idempotency key on ingest** (section 3).
 
 (1) and (2) also unblock the Node's citation feature, which pins Archive
 records into a project so an analysis stays checkable later. They are not
