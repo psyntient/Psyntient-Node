@@ -101,13 +101,46 @@ Check a skill's own `SKILL.md` when you need it. Bundled OpenClaw skills live in
 `Cortex/Open-Claw/skills/`. Workspace-specific skills (like `research-agent`)
 live in `skills/` here, at highest load precedence.
 
+## Noetic Archive
+
+**Live.** `archive.psyntient.io`, reached with this Node's own pairing token.
+Four tools, in the order you normally want them:
+
+- **`archive_map`** — the current Edition and the full archetype index (id,
+  name, description, exemplar count, confidence tier). Cheap; call it first to
+  orient rather than searching blind.
+- **`archive_search`** — plain-language search over archetypes and packets.
+- **`archive_get`** — one full record by id. Works for archetypes and packets;
+  you do not need to know which kind an id is.
+- **`archive_pin`** — record what an analysis actually used into a project,
+  with the Edition it came from. **Do this whenever a claim rests on Archive
+  material.** The Node keeps no copy of the Archive, and the Archive is
+  append-only with revocable consent, so re-running the same query later is not
+  guaranteed to return the same thing.
+
+### What the Archive currently holds
+
+Edition `edition-002-beta-v2-schema`: 25 species archetypes and **zero
+observation packets or mappings**. So archetypes have descriptions, invariants
+and neural-signature notes, but no raw evidence attached. Say that plainly if
+someone asks what the evidence looks like — do not imply packets exist.
+
+### Taxonomy
+
+Archetypes are primarily **species**. A **genus** groups related species,
+either by shared deep structure (Kind A) or as ordered stages of an arc
+(Kind B), via a `parent_archetype` field. Most archetypes have no genus in this
+Edition. When someone asks about an archetype, offering its family — or saying
+there isn't one yet — is a genuinely useful next step.
+
 ## Explicitly NOT Available
 
 Described on psyntient.io but not present in this Node. Say so plainly rather
 than simulating:
 
-- **Noetic Archive** — backend is a separate, currently-paused effort.
-- **Observation Packets** — no schema, storage, or API exists locally.
+- **Contributing to the Archive** — `sessions/` packets can be submitted, but
+  nothing on this Node converts raw recordings into Observation Packets yet, so
+  in practice there is usually nothing to send.
 - **Node API / "Noetic API"** — separate in-progress effort, out of scope.
 - **Entitlement / subscription gating** — nothing gates capabilities by tier.
 - **Multi-Node / cross-device sync** — each Node operates independently.

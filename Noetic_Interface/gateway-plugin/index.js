@@ -144,7 +144,11 @@ export default {
       label: "Archive map",
       description:
         "Orient in the Noetic Archive: the current Edition and the full archetype index (id, name, description, how many exemplars support it). Call this first -- archetypes are the Archive's primary semantic objects and the index is small and stable, so it is cheaper than searching blind.",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+      // No parameters. Deliberately no `additionalProperties` and no empty
+      // `properties` map: Gemini's function declarations reject the former and
+      // choke on the latter, which surfaces only as "Provider finish_reason:
+      // error" with no hint that a tool schema was the cause.
+      parameters: { type: "object", properties: {} },
       execute: async () => {
         const archive = await daemonModule("archive-client.mjs");
         return text(await archive.getMap());
@@ -162,7 +166,6 @@ export default {
           query: { type: "string", description: "Plain-language description of what to look for." },
         },
         required: ["query"],
-        additionalProperties: false,
       },
       execute: async (_toolCallId, params) => {
         const archive = await daemonModule("archive-client.mjs");
@@ -179,7 +182,6 @@ export default {
         type: "object",
         properties: { id: { type: "string", description: "Archetype or packet id." } },
         required: ["id"],
-        additionalProperties: false,
       },
       execute: async (_toolCallId, params) => {
         const archive = await daemonModule("archive-client.mjs");
@@ -204,7 +206,6 @@ export default {
           query: { type: "string", description: "The question these records were found for." },
         },
         required: ["projectId", "ids"],
-        additionalProperties: false,
       },
       execute: async (_toolCallId, params) => {
         const archive = await daemonModule("archive-client.mjs");

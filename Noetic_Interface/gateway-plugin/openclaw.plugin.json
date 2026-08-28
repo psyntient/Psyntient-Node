@@ -1,7 +1,7 @@
 {
   "id": "psyntient",
   "name": "Psyntient",
-  "description": "Noetic Interface backend routes: onboarding gate, pairing, and Vault. Bridges the gateway-served SPA to the Psyntient daemon modules.",
+  "description": "Noetic Interface backend routes (onboarding, pairing, Vault, projects, sync) plus Cortex's Noetic Archive tools.",
   "enabledByDefault": true,
   "activation": {
     "onStartup": true
@@ -10,5 +10,13 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {}
+  },
+  "contracts": {
+    "tools": [
+      "archive_map",
+      "archive_search",
+      "archive_get",
+      "archive_pin"
+    ]
   }
 }

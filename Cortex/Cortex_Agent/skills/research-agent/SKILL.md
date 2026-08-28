@@ -147,20 +147,27 @@ from `Cortex/Open-Claw/` — `working-memory.mjs` and `vault.mjs` resolve
 WebClaw chat transcripts, unrelated to research artifacts. This skill only ever
 reads/writes `cortex_projects/`. Don't conflate the two.
 
-## Not available yet
+## Archive access, and what is still missing
 
-This skill does **not** have access to the Noetic Archive, cannot cross-reference
-personal data against archived records, and cannot create or read "Observation
-Packets." Those are described on psyntient.io as part of the broader Psyntient
-ecosystem but are not implemented in this Node — the Archive backend is a separate,
-currently-paused effort on infrastructure outside this repo. There is also no
-subscription-tier or entitlement gating locally; this skill is available to any
-user of this Node once installed, regardless of what the marketing site's
-"activates based on subscription tier" language implies.
+**Reading the Archive works.** Use `archive_map`, `archive_search` and
+`archive_get`, and **`archive_pin` whenever an analysis rests on Archive
+material** — the Node keeps no copy, and the Archive is append-only with
+revocable consent, so re-running a query later is not guaranteed to return the
+same records. A pin writes them into the project with the Edition they came
+from, which is what keeps a claim checkable later.
 
-If a user asks for archive cross-referencing or Observation Packet workflows, say
-so plainly rather than attempting to simulate them — research projects are still
-fully usable for local analysis of whatever Vault data the user actually has.
+**Cross-referencing personal data against archived records is thin, not
+blocked.** The current Edition has 25 archetypes and **zero observation
+packets**, so there is nothing yet to correlate a participant's data against.
+Say that rather than implying the comparison was run and found nothing.
+
+**Creating Observation Packets is genuinely not built.** Nothing on this Node
+converts a raw recording into packet form, so contribution usually has nothing
+to send even from an eligible project.
+
+There is no subscription-tier or entitlement gating locally; this skill is
+available to any user of this Node once installed, regardless of what the
+marketing site's "activates based on subscription tier" language implies.
 The data types from step 1 are what decide whether a project could ever
 contribute: `archiveEligible` in its `.project.json` is derived from them. The
 Archive itself is reachable now (see the `archive_*` tools in
