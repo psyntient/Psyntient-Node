@@ -27,7 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { openInBrowser } from "./open-browser.mjs";
-import { url as interfaceUrl } from "./interface-control.mjs";
+import { paths as gatewayPaths } from "./openclaw-control.mjs";
 import { deviceName } from "./device-name.mjs";
 
 const PSYNTIENT_DIR = path.join(os.homedir(), ".psyntient");
@@ -83,8 +83,11 @@ function htmlPage(message, { closeSelf = false, link = false } = {}) {
   const closeScript = closeSelf
     ? `<script>setTimeout(function(){window.close()},900)</script>`
     : "";
+  // v2 serves the Interface from the Gateway itself, so "return to the Node"
+  // is the gateway origin. v1 pointed at a separate vite server on 3210;
+  // interface-control.mjs is gone with the rest of that stack.
   const linkHtml = link
-    ? `<p><a href="${interfaceUrl()}" style="color:#EEBC4A">Return to Psyntient Node →</a></p>`
+    ? `<p><a href="http://127.0.0.1:${gatewayPaths.GATEWAY_PORT}/" style="color:#EEBC4A">Return to Psyntient Node →</a></p>`
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><title>Psyntient Node</title></head><body style="font-family:system-ui;background:#0C0A1D;color:#FEF4E3;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;gap:12px"><p>${message}</p>${linkHtml}${closeScript}</body></html>`;
 }

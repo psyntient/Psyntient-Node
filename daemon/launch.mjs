@@ -13,7 +13,6 @@
 // unconditionally starts the Gateway and Interface; the wizard decides
 // whether the user sees onboarding or goes straight to chat.
 import { ensureRunning as ensureGatewayRunning, paths as gatewayPaths } from "./openclaw-control.mjs";
-import { ensureRunning as ensureInterfaceRunning, url as interfaceUrl } from "./interface-control.mjs";
 import { ensureRunning as ensureHeartbeatRunning } from "./heartbeat-control.mjs";
 import { activateLocal as activateLocalVault } from "./vault.mjs";
 import { ensureScaffold as ensureWorkingMemoryScaffold } from "./working-memory.mjs";
@@ -71,15 +70,13 @@ async function main() {
   console.log("Psyntient Node: checking Gateway...");
   const gatewayStatus = await ensureGatewayRunning();
 
-  console.log("Starting the Noetic Interface...");
-  let url;
-  try {
-    await ensureInterfaceRunning();
-    url = interfaceUrl();
-  } catch (err) {
-    console.error(`Noetic Interface failed to start (${err.message}) — falling back to the OpenClaw dashboard.`);
-    url = gatewayStatus.interfaceUrl || `http://127.0.0.1:${gatewayPaths.GATEWAY_PORT}/`;
-  }
+  // v2 serves the Interface from the Gateway itself: the Control UI fork IS
+  // the Noetic Interface, built into dist/control-ui and served on the gateway
+  // port. v1 ran a separate vite-preview process on 3210 from
+  // Noetic_Interface/web and only fell back to the gateway when that failed --
+  // so what used to be the fallback is now the whole story. One process fewer,
+  // one port fewer, and no second origin to keep the auth token in sync with.
+  const url = gatewayStatus.interfaceUrl || `http://127.0.0.1:${gatewayPaths.GATEWAY_PORT}/`;
   console.log(`Opening ${url}`);
   openInBrowser(authedDashboardUrl(url));
 }

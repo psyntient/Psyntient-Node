@@ -331,6 +331,41 @@ export default {
       }),
     });
 
+    // --- Archive read -----------------------------------------------------
+    // GET                -> Edition manifest + archetype index (the map)
+    // GET ?query=<text>  -> search
+    // GET ?id=<id>       -> one full record
+    //
+    // Thin pass-through to daemon/archive-client.mjs. The token lives in
+    // ~/.psyntient/node.key at mode 600 and must never reach a browser, so the
+    // viewer talks to this route and the daemon holds the credential.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/archive",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "GET") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        const archive = await daemonModule("archive-client.mjs");
+        const url = new URL(req.url, "http://localhost");
+        const id = url.searchParams.get("id");
+        const query = url.searchParams.get("query");
+        try {
+          if (id) return sendJson(res, 200, { ok: true, ...(await archive.getRecord(id)) });
+          if (query) return sendJson(res, 200, { ok: true, ...(await archive.search(query)) });
+          return sendJson(res, 200, { ok: true, ...(await archive.getMap()) });
+        } catch (err) {
+          // Unreachable Archive, unpaired Node and revoked token are all normal
+          // states for a local-first app, not server faults. 200 with an error
+          // field lets the viewer render an explanation instead of a stack.
+          return sendJson(res, 200, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
     // --- Archive sync -----------------------------------------------------
     // GET  -> { autoSyncAll, projects: [...], active }
     // POST -> { action:"set-global", enabled }
