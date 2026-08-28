@@ -355,27 +355,62 @@ strong for Archive.
 
 ## What a Project contains, and which Projects can contribute to the Archive
 
-### Chat is NOT in the Project today — verified, and it matters
+### Two kinds of material, and only one of them is evidence
 
-`Working_Memory/` has two sibling trees, and threads live in neither's child:
+Corrected 2026-08-28. An earlier draft of this document treated chat as a
+plausible source of the first-person report. **It is not, and should never
+be.** Archive data does not arrive as typed text at all:
+
+> "RECORDING — Open, stream, and close a live capture session against a
+> connected device." / "Register a device with the Node and its data lands in
+> the user's Vault with consent and provenance intact **from the first
+> sample**." — psyntient.io/node/interface
+
+So ingress is the **Node API** (a device or app streaming a capture session)
+or a **file upload to the Node**, and the Node routes it to that user's Vault.
+The first-person report is authored at capture time, by the capture app,
+inside the packet — not reconstructed afterwards from a conversation.
+
+That gives a clean split, and it removes the privacy problem the earlier
+framing created:
+
+| | what it is | where it comes from | Archive-eligible |
+|---|---|---|---|
+| **Evidence** | capture sessions: recordings + their reports | Node API / file upload | yes |
+| **Working material** | planning, analysis, notes, chat | Cortex and the researcher | **never** |
+
+A transcript is categorically not evidence. There is no path by which one
+becomes a report, so nothing has to decide case by case whether it is safe to
+include — the answer is always no.
+
+### Project layout: text beside data
 
 ```
-Working_Memory/
-├── chat_context/<thread_id>/      messages.jsonl, .meta.json   <- the chat
-└── cortex_projects/<project_id>/  notes.md, scratch/, logs/,
-                                   citations/                   <- the Project
+Working_Memory/cortex_projects/<id>/        ->  Neural_Vault/.../<id>/
+├── notes.md      planning + analysis text  ->  notes/
+├── sessions/     CAPTURE DATA (evidence)   ->  sessions/
+├── citations/    pinned Archive records    ->  analyses/
+├── scratch/      working artifacts         ->  exports/
+└── logs/         agent run byproducts      ->  exports/logs/
 ```
 
-The only link is the session `category` field, which equals the project id.
-Nothing physically nests a thread under a Project, and `syncProjectToVault()`
-copies `notes.md`, `logs/`, `scratch/` and `citations/` — **not transcripts**.
-So a Project's chats are associated with it, not contained by it.
+`sessions/` is the only Archive-eligible directory. Everything else is the
+researcher's own working material and stays on the Node unless they
+deliberately export it.
 
-That is fine for scoping the sidebar. It is a real gap the moment a Project
-becomes the unit of Archive contribution, because in a Psyntient Node the
-**first-person report is plausibly written in chat** — the participant
-describing the experience to Cortex. That is the phenomenological half of an
-Observation Packet, and it currently lives outside the thing being contributed.
+**Corrected a real hazard here.** `syncProjectToVault()` previously mapped
+`logs/ -> sessions/`, which was wrong twice: agent run logs are byproducts
+rather than evidence, and putting them in the directory a contribution is
+assembled from meant agent output could be swept into a published, immutable
+Edition. Fixed, and safe to fix because `logs/` never had a writer — the old
+mapping had never moved a byte.
+
+**Evidence should land in the Vault first.** The normal project lifecycle is
+work in `Working_Memory/`, sync to the Vault, erase the working copy. Invert it
+for captured data: a recording is immutable evidence with provenance "from the
+first sample", and the only copy must never sit in the half that is designed to
+be erased. Write captures to the Vault on arrival; the working copy holds what
+an analysis is actively using.
 
 ### The eligibility gate already exists: `modality`
 
@@ -415,17 +450,14 @@ Two rules, the second easy to miss:
    opt-in the user sets knowingly — not a default that has to be discovered
    and disabled. This matches SOUL.md ("always with the user's explicit
    consent") and the Archive page ("Every contribution is voluntary").
-2. **A chat transcript is never the report.** A thread holds everything the
-   user said in that Project — unrelated tangents, personal context, other
-   people's names, half-formed thoughts. Dumping it as the "first-person
-   report" would leak all of that into an immutable, published, unretractable
-   Edition. The report must be a **deliberately authored or selected artifact**
-   that the user sees in full before consenting. Cortex may help draft it from
-   the conversation; the transcript itself must not be the payload.
-
-That second rule is why the gap in the first section matters but must not be
-closed by simply syncing transcripts into the Project. The fix is an explicit
-report artifact, not a wider net.
+2. **Only `sessions/` is ever the payload.** Contribution reads from the
+   evidence directory and nowhere else. Notes, scratch, logs, citations and
+   transcripts are the researcher's working material and are never candidates,
+   so there is no per-item judgement to get wrong. A thread holds everything
+   said in that Project — tangents, personal context, other people's names —
+   and an Edition is immutable and unretractable once published; the way to
+   never leak that is for transcripts to be structurally outside the
+   contribution path, not carefully filtered on the way in.
 
 ## Blocked on
 

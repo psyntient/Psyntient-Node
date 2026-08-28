@@ -164,6 +164,7 @@ export function createProject({ projectId, title, modality }) {
   fs.mkdirSync(workDir, { recursive: true });
   fs.mkdirSync(path.join(workDir, "scratch"), { recursive: true });
   fs.mkdirSync(path.join(workDir, "logs"), { recursive: true });
+  fs.mkdirSync(path.join(workDir, "sessions"), { recursive: true });
   const notesPath = path.join(workDir, "notes.md");
   if (!fs.existsSync(notesPath)) {
     fs.writeFileSync(notesPath, `# ${title || projectId}\n`);
@@ -234,7 +235,18 @@ export function syncProjectToVault(projectId) {
     fs.mkdirSync(path.join(vaultDir, "notes"), { recursive: true });
     fs.copyFileSync(notesPath, path.join(vaultDir, "notes", "notes.md"));
   }
-  copyDirContentsInto(path.join(workDir, "logs"), path.join(vaultDir, "sessions"));
+  // sessions/ is CAPTURE sessions -- the neural/physiological recordings and
+  // their reports, arriving through the Node API or a file upload, never typed
+  // in as chat. It is the only Archive-eligible material in a project, so it
+  // must hold evidence and nothing else.
+  //
+  // It used to be fed from logs/ instead. That was wrong twice over: agent run
+  // logs are byproducts, not evidence, and putting them in the directory a
+  // contribution is assembled from means agent output could be swept into a
+  // published Edition. Safe to correct because logs/ has never had a writer --
+  // the old mapping never moved a byte. Logs now land under exports/.
+  copyDirContentsInto(path.join(workDir, "sessions"), path.join(vaultDir, "sessions"));
+  copyDirContentsInto(path.join(workDir, "logs"), path.join(vaultDir, "exports", "logs"));
   copyDirContentsInto(path.join(workDir, "scratch"), path.join(vaultDir, "exports"));
   // Archive citations -> analyses/. This is what finally gives the Vault's
   // `analyses/` directory a writer; it was scaffolded from Phase H onward with
