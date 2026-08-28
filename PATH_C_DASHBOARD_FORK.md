@@ -576,6 +576,44 @@ and let the gateway serve it.
 gateway serves the UI same-origin and mints credentials. The auth blocker
 recorded above was an artifact of a sandboxed fresh browser profile only.
 
+## Typechecking this fork — the ONLY correct command
+
+```bash
+cd Cortex/Open-Claw && node scripts/run-tsgo.mjs -p tsconfig.ui.json
+```
+
+**`npx tsc --noEmit -p tsconfig.json` run from `ui/` is a silent no-op** —
+there is no `ui/tsconfig.json`. It exits 0 having checked nothing, so it reads
+as a clean typecheck. Every "typecheck clean" claim made against it during the
+Projects build was meaningless; running the real lane afterwards surfaced 12
+genuine errors (unused imports left by the sidebar/settings trim, plus a
+protected-member access in `app-sidebar-render.ts`). Root `AGENTS.md` says it
+outright: *"Typecheck: `tsgo` lanes only; never add `tsc --noEmit`."*
+
+Note the build does not catch these: `node scripts/ui.js build` is esbuild-based
+and strips types without checking them, so a UI bundle builds and runs fine
+while the typecheck is red.
+
+## Heartbeat cron disabled on the Node (2026-08-27)
+
+OpenClaw auto-registers a `heartbeat:<agentId>` cron job that wakes the agent
+every 30 minutes (`DEFAULT_HEARTBEAT_EVERY`, `src/cron/heartbeat-monitor.ts`).
+On this Node every wake failed with *"No route-compatible authentication source
+is configured for openai"* and **wrote "The agent run failed before producing a
+reply." straight into the main session's transcript**, where the user sees it.
+It was also what produced the "1 cron job(s) overdue" chip.
+
+Disabled via `agents.defaults.heartbeat.every = "0m"` in
+`~/.psyntient/openclaw-state/openclaw.json` (`resolveHeartbeatIntervalMs`
+returns `null` for `ms <= 0`, which sets the job `enabled: false`; after a
+gateway restart `cron list` reports "No cron jobs"). Backup at
+`openclaw.json.bak-heartbeat`.
+
+This is the right default for Psyntient regardless of the openai key: a
+local research assistant should not self-poll every 30 minutes, burning
+tokens and appending noise to the user's chat. **The installer must write this
+setting** — a fresh Node would otherwise reproduce the same failing wake loop.
+
 ## Known debt: hand-edited locale bundles
 
 `Cortex/Open-Claw/ui/CLAUDE.md` states: *"Do not hand-edit non-English locale
