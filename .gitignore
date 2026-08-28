@@ -41,3 +41,10 @@ logs/*
 /.clawhub/
 /.openclaw/
 Cortex/openclaw-state/
+
+# Plugin dependency tree: typebox (required for agent tool schemas) and a
+# file: link to the local OpenClaw checkout for the plugin SDK. Reinstalled
+# with `npm install` in that directory; the lockfile pins the local path and
+# is machine-specific.
+Noetic_Interface/gateway-plugin/node_modules/
+Noetic_Interface/gateway-plugin/package-lock.json

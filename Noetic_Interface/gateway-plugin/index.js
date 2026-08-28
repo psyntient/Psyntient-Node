@@ -31,6 +31,15 @@
  * unprefixed one returns SPA HTML. Do not "tidy" this prefix away.
  */
 import path from "node:path";
+import { Type } from "typebox";
+// definePluginEntry, not a bare object literal. docs.openclaw.ai/plugins/
+// sdk-entrypoints: "Every plugin exports a default entry object. The SDK
+// provides a helper for each entry shape" -- a plain { id, register } loads
+// far enough to run register() and mount HTTP routes, so it looks fine, but
+// its registerTool() calls never propagate to the agent's toolset. That is the
+// symptom in openclaw#61790 / #50328 / #47683, all closed without a fix
+// because the entry shape was unsupported rather than the loader broken.
+import { definePluginEntry } from "openclaw/plugin-sdk/core";
 import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -118,7 +127,7 @@ function route(handler) {
   };
 }
 
-export default {
+export default definePluginEntry({
   id: "psyntient",
 
   register(api) {
@@ -148,7 +157,7 @@ export default {
       // `properties` map: Gemini's function declarations reject the former and
       // choke on the latter, which surfaces only as "Provider finish_reason:
       // error" with no hint that a tool schema was the cause.
-      parameters: { type: "object", properties: {} },
+      parameters: Type.Object({}),
       execute: async () => {
         const archive = await daemonModule("archive-client.mjs");
         return text(await archive.getMap());
@@ -160,13 +169,9 @@ export default {
       label: "Search the Archive",
       description:
         "Search the Noetic Archive in plain language. Returns matching archetypes and packets with their ids. Use archive_get for the full record of anything worth reading closely.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Plain-language description of what to look for." },
-        },
-        required: ["query"],
-      },
+      parameters: Type.Object({
+        query: Type.String({ description: "Plain-language description of what to look for." }),
+      }),
       execute: async (_toolCallId, params) => {
         const archive = await daemonModule("archive-client.mjs");
         return text(await archive.search(String(params?.query ?? "")));
@@ -178,11 +183,9 @@ export default {
       label: "Read an Archive record",
       description:
         "Fetch one full Archive record by id -- an archetype (e.g. NA-0012-grand-vastness-awe) or a packet. You do not need to know which kind it is.",
-      parameters: {
-        type: "object",
-        properties: { id: { type: "string", description: "Archetype or packet id." } },
-        required: ["id"],
-      },
+      parameters: Type.Object({
+        id: Type.String({ description: "Archetype or packet id." }),
+      }),
       execute: async (_toolCallId, params) => {
         const archive = await daemonModule("archive-client.mjs");
         return text(await archive.getRecord(String(params?.id ?? "")));
@@ -194,19 +197,15 @@ export default {
       label: "Pin Archive records to a project",
       description:
         "Record Archive records into a project as citations, with the Edition they came from. Do this whenever an analysis or a claim rests on Archive material: the Node does not keep a copy of the Archive, and the Archive is append-only with revocable consent, so re-running the same query later is not guaranteed to return the same thing.",
-      parameters: {
-        type: "object",
-        properties: {
-          projectId: { type: "string", description: "Project to cite into, e.g. thesis-chapter-3." },
-          ids: {
-            type: "array",
-            items: { type: "string" },
-            description: "Archetype or packet ids the analysis actually used.",
-          },
-          query: { type: "string", description: "The question these records were found for." },
-        },
-        required: ["projectId", "ids"],
-      },
+      parameters: Type.Object({
+        projectId: Type.String({ description: "Project to cite into, e.g. thesis-chapter-3." }),
+        ids: Type.Array(Type.String(), {
+          description: "Archetype or packet ids the analysis actually used.",
+        }),
+        query: Type.Optional(
+          Type.String({ description: "The question these records were found for." }),
+        ),
+      }),
       execute: async (_toolCallId, params) => {
         const archive = await daemonModule("archive-client.mjs");
         const wm = await daemonModule("working-memory.mjs");
@@ -329,6 +328,57 @@ export default {
           return sendJson(res, 200, { ok: true, tested: result });
         }
         return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }),
+    });
+
+    // --- Archive semantic search ------------------------------------------
+    // GET ?query=<text>  -> Server-Sent Events: stage updates, then a result.
+    //
+    // Streamed rather than a blocking request because the match step is a real
+    // model call taking tens of seconds. The client needs to show what is
+    // happening during it, and a request held open that long with nothing on
+    // the wire looks indistinguishable from a hang.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/archive/search",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const url = new URL(req.url, "http://localhost");
+        const query = url.searchParams.get("query") ?? "";
+        if (!query.trim()) {
+          return sendJson(res, 400, { ok: false, error: "query required" });
+        }
+
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          // The Interface is same-origin, but a proxy in front would otherwise
+          // buffer the whole stream and defeat the point of streaming it.
+          "X-Accel-Buffering": "no",
+        });
+        const send = (event, data) => {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+
+        // Keeps intermediaries from closing an idle connection during the long
+        // model call, and gives the client a heartbeat to animate against.
+        const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 5_000);
+
+        try {
+          const search = await daemonModule("archive-search.mjs");
+          const result = await search.semanticSearch(query, {
+            onStage: (stage) => send("stage", stage),
+          });
+          send("result", result);
+        } catch (err) {
+          send("result", {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          clearInterval(keepAlive);
+          res.end();
+        }
       }),
     });
 
@@ -632,4 +682,4 @@ export default {
       }),
     });
   },
-};
+});

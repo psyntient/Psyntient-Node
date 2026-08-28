@@ -108,6 +108,7 @@ export async function getMap() {
     request("/meta"),
     request("/archetypes", { limit: 200 }),
   ]);
+  noteEdition(meta.edition_id);
   return {
     edition: {
       editionId: meta.edition_id,
@@ -150,6 +151,11 @@ export async function search(query, { limit } = {}) {
  */
 export async function getRecord(id) {
   if (!id?.trim()) throw new ArchiveError("getRecord needs an id.");
+  // Served from the batch a search already pulled, when present.
+  const cached = cacheGet(id.trim());
+  if (cached) {
+    return { kind: "archetype", record: cached, cached: true };
+  }
   try {
     return { kind: "archetype", record: await request(`/archetypes/${encodeURIComponent(id)}`) };
   } catch (err) {
@@ -163,7 +169,151 @@ export async function getArchetypePackets(archetypeId, { limit, offset } = {}) {
   return request(`/archetypes/${encodeURIComponent(archetypeId)}/packets`, { limit, offset });
 }
 
-export default { getMap, search, getRecord, getArchetypePackets, archiveBaseUrl, ArchiveError };
+
+// --- record cache ---------------------------------------------------------
+//
+// Shared by search and by the viewer expanding a chip. Search batch-pulls its
+// shortlist, so by the time the chips render the records are already here and
+// clicking one costs nothing. Without this the viewer re-fetches an archetype
+// the Node downloaded seconds earlier.
+//
+// In-memory and process-local on purpose: this is a latency cache, not
+// storage. The Archive is append-only with revocable consent, so a copy that
+// outlived the process would be a small mirror -- exactly what
+// ARCHIVE_INTEGRATION.md rules out.
+const RECORD_CACHE = new Map();
+/**
+ * Session-length, not minutes.
+ *
+ * A researcher working one topic keeps meeting the same archetypes, and a
+ * short TTL made them re-download records they had just looked at. The natural
+ * clear point is gateway start -- this is in-memory, so a restart empties it
+ * without any code. A browser refresh deliberately does NOT clear it: the
+ * whole point is surviving a refresh mid-session.
+ *
+ * Still bounded rather than unbounded, for two different reasons:
+ *  - Time: the gateway is a LaunchAgent and runs for days, so "no TTL" would
+ *    mean "until reboot". The Archive is append-only with revocable consent,
+ *    so a record cached indefinitely is a small mirror -- the thing
+ *    ARCHIVE_INTEGRATION.md rules out.
+ *  - Edition: archetypes get renamed and merged between Editions, so a cached
+ *    record from a previous Edition is not merely stale, it can be wrong.
+ */
+const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+/** Edition the cached records came from; a change wipes them. */
+let cacheEdition = null;
+
+/**
+ * Drop everything when the Edition changes.
+ *
+ * Correctness, not housekeeping: a renamed or merged archetype held from a
+ * previous Edition would be served as current with no indication it had moved.
+ */
+export function noteEdition(editionId) {
+  if (editionId && cacheEdition && editionId !== cacheEdition) {
+    RECORD_CACHE.clear();
+  }
+  if (editionId) cacheEdition = editionId;
+}
+
+/** Explicit wipe, for a "refresh from the Archive" control. */
+export function clearCache() {
+  const size = RECORD_CACHE.size;
+  RECORD_CACHE.clear();
+  return { cleared: size };
+}
+
+function cacheGet(id) {
+  const hit = RECORD_CACHE.get(id);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CACHE_TTL_MS) {
+    RECORD_CACHE.delete(id);
+    return null;
+  }
+  return hit.record;
+}
+
+function cachePut(records) {
+  const at = Date.now();
+  for (const record of records) {
+    if (record?.id) RECORD_CACHE.set(record.id, { at, record });
+  }
+}
+
+/** Drops expired entries; called opportunistically rather than on a timer. */
+function cacheSweep() {
+  const now = Date.now();
+  for (const [id, hit] of RECORD_CACHE) {
+    if (now - hit.at > CACHE_TTL_MS) RECORD_CACHE.delete(id);
+  }
+}
+
+export function cacheStats() {
+  cacheSweep();
+  return { size: RECORD_CACHE.size, ttlMs: CACHE_TTL_MS, edition: cacheEdition };
+}
+
+/**
+ * Fetch many archetypes in ONE request, serving whatever is already cached.
+ *
+ * The Archive gained POST /api/v1/archetypes/batch for this. Fetching a
+ * shortlist one id at a time was N HTTPS round trips against a shared service
+ * -- fine for 3, wasteful at 8, and rude at scale.
+ */
+export async function batchGetArchetypes(ids) {
+  const wanted = [...new Set((ids ?? []).filter(Boolean))];
+  const cached = [];
+  const missing = [];
+  for (const id of wanted) {
+    const hit = cacheGet(id);
+    if (hit) cached.push(hit);
+    else missing.push(id);
+  }
+
+  let fetched = [];
+  if (missing.length > 0) {
+    const url = new URL("/api/v1/archetypes/batch", archiveBaseUrl());
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${readNodeToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ids: missing }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new ArchiveError("The Archive rejected this Node's credentials.", {
+        status: res.status,
+      });
+    }
+    if (!res.ok) {
+      throw new ArchiveError(`Archive returned HTTP ${res.status} for batch fetch.`, {
+        status: res.status,
+      });
+    }
+    fetched = await res.json();
+    cachePut(fetched);
+  }
+
+  // Return in the caller's order: search ranks its shortlist by relevance and
+  // cache-hit ordering would otherwise scramble it.
+  const byId = new Map([...cached, ...fetched].map((r) => [r.id, r]));
+  return wanted.map((id) => byId.get(id)).filter(Boolean);
+}
+
+export default {
+  getMap,
+  search,
+  getRecord,
+  getArchetypePackets,
+  batchGetArchetypes,
+  cacheStats,
+  clearCache,
+  noteEdition,
+  archiveBaseUrl,
+  ArchiveError,
+};
 
 // --- CLI ------------------------------------------------------------------
 // Mirrors working-memory.mjs: every function reachable from the shell, so the
