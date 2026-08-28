@@ -39,9 +39,16 @@ if ! systemctl is-active --quiet noetic-api; then
   echo "   systemctl start noetic-api && systemctl status noetic-api" >&2
   exit 1
 fi
-curl -fsS "http://${UPSTREAM}/api/v1/meta" >/dev/null \
-  || { echo "!! ${UPSTREAM} is not answering /api/v1/meta; not proxying to a dead upstream." >&2; exit 1; }
-echo "    noetic-api is up and answering on ${UPSTREAM}"
+# Any HTTP status proves the upstream is alive. 401 is the CORRECT answer here:
+# every /api/v1/* route requires a node token, so an unauthenticated probe that
+# gets 401 has proven both liveness and that the auth gate is working. Only a
+# connection failure (curl exit 7) means there is nothing to proxy to.
+UPSTREAM_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "http://${UPSTREAM}/api/v1/meta" || true)"
+if [ "${UPSTREAM_STATUS}" = "000" ] || [ -z "${UPSTREAM_STATUS}" ]; then
+  echo "!! Nothing answering on ${UPSTREAM}; not proxying to a dead upstream." >&2
+  exit 1
+fi
+echo "    noetic-api is up on ${UPSTREAM} (HTTP ${UPSTREAM_STATUS})"
 
 echo "==> Firewall (SSH allowed BEFORE enabling, so this cannot lock you out)"
 apt-get update -qq
@@ -81,15 +88,13 @@ ${DOMAIN} {
 		header_up X-Forwarded-Proto https
 	}
 
-	log {
-		output file /var/log/caddy/archive.log
-		format json
-	}
+	# Log to journald (Caddy's systemd default) rather than a file. A file sink
+	# needs the log created as the caddy user, and `caddy validate` -- which runs
+	# as root -- creates it first as root:root 0600, so the service then cannot
+	# write it. journalctl -u caddy gives the same output with no ownership or
+	# rotation to manage.
 }
 EOF
-
-mkdir -p /var/log/caddy
-chown -R caddy:caddy /var/log/caddy
 
 echo "==> Validating config"
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
