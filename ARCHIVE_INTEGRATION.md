@@ -505,6 +505,25 @@ rather than merely "some files exist". A project full of raw `.edf` recordings
 is not contributable until something converts them, and counting those as
 ready would make auto-sync promise a submission it cannot assemble.
 
+### Correction: archetype relationships DO exist
+
+An earlier draft of this document said the Archive exposes no relationships, so
+any edge between archetypes would be invented. That was wrong, and it
+understated what the Archive already holds. Every archetype record carries a
+`related` map of `{archetype_id: why}`, authored by the Architect — real,
+explained edges. The viewer makes them navigable.
+
+It also carries far more than the list endpoint suggests:
+`phenomenological_signature` (invariants, common variants), `neural_signature`
+(hypothesis, evidence, strength), `boundary_conditions` (what it is NOT, and
+near neighbours), `open_questions`, `modality_coverage`, `latent_structure`,
+`cluster_ecology`, and `associable_frameworks`.
+
+What is genuinely absent is packet↔archetype **`mappings`** (0 in this
+Edition) — which is what a similarity or clustering *layout* would need. That
+distinction is the one to hold: edges between archetypes are real; the evidence
+that would position them in a space is not there yet.
+
 **Not built yet:** the conversion from raw capture to packet, and the
 contribution call itself. The Node can read the Archive; it cannot write to it.
 
