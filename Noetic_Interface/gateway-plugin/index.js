@@ -331,6 +331,126 @@ export default definePluginEntry({
       }),
     });
 
+    // --- Vault ledger ------------------------------------------------------
+    // GET -> the indexed contents of the active Vault.
+    //
+    // Distinct from /psyntient/vault, which is storage CONFIG (mode, path,
+    // provider). This is what the Vault actually holds: projects, declared
+    // data types, packet counts, and what the Archive would accept.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/vault-ledger",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "GET") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        try {
+          const ledger = await daemonModule("vault-ledger.mjs");
+          const sync = await daemonModule("archive-sync.mjs");
+          const settings = sync.readSettings();
+          const data = await ledger.readLedger();
+          return sendJson(res, 200, {
+            ok: true,
+            ...data,
+            autoSyncAll: settings.autoSyncAll,
+            projects: data.projects.map((p) => ({
+              ...p,
+              // Resolved here rather than in the page: the tri-state rule
+              // (explicit choice beats the Node default) lives in one place.
+              autoSyncEffective: sync.resolveAutoSync(p, settings),
+            })),
+          });
+        } catch (err) {
+          // An unconfigured or relocated Vault is a normal local state, not a
+          // server fault -- render an explanation rather than a stack.
+          return sendJson(res, 200, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
+    // --- Vault semantic search --------------------------------------------
+    // GET ?query=<text>  -> Server-Sent Events: stage updates, then a result.
+    //
+    // Same stream shape as the Archive search for the same reason: the match
+    // step is a real model call taking tens of seconds, and a request held
+    // open that long with nothing on the wire is indistinguishable from a
+    // hang. The corpus differs -- this searches the researcher's own Vault --
+    // but nothing about the transport does.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/vault/search",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const url = new URL(req.url, "http://localhost");
+        const query = url.searchParams.get("query") ?? "";
+        if (!query.trim()) {
+          return sendJson(res, 400, { ok: false, error: "query required" });
+        }
+
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        const send = (event, data) => {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 5_000);
+
+        try {
+          const search = await daemonModule("vault-search.mjs");
+          const result = await search.semanticSearch(query, {
+            onStage: (stage) => send("stage", stage),
+          });
+          send("result", result);
+        } catch (err) {
+          send("result", {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          clearInterval(keepAlive);
+          res.end();
+        }
+      }),
+    });
+
+    // --- Vault project detail ----------------------------------------------
+    // GET ?project=<id>[&device=<name>]  -> one project's actual contents.
+    //
+    // Separate from the ledger on purpose. The ledger is summary-first and
+    // caps its per-file sample, because a Vault holding years of capture has
+    // far more files than any list shows and shipping all of them to every
+    // caller would make the index more expensive than the walk it replaces.
+    // Detail is therefore pulled for one project at a time, when opened.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/vault/project",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "GET") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        const url = new URL(req.url, "http://localhost");
+        const projectId = url.searchParams.get("project");
+        const device = url.searchParams.get("device");
+        if (!projectId) {
+          return sendJson(res, 400, { ok: false, error: "project required" });
+        }
+        try {
+          const detail = await daemonModule("vault-project.mjs");
+          return sendJson(res, 200, await detail.readProject(projectId, { device }));
+        } catch (err) {
+          return sendJson(res, 200, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
     // --- Archive semantic search ------------------------------------------
     // GET ?query=<text>  -> Server-Sent Events: stage updates, then a result.
     //
@@ -445,7 +565,7 @@ export default definePluginEntry({
         if (req.method === "GET") {
           const ledger = await daemonModule("vault-ledger.mjs");
           const settings = sync.readSettings();
-          const projects = ledger.readLedger().projects.map((p) => ({
+          const projects = (await ledger.readLedger()).projects.map((p) => ({
             projectId: p.projectId,
             title: p.title,
             dataTypes: p.dataTypes,

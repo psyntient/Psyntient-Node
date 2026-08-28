@@ -478,6 +478,27 @@ update (rule 3 above).
 Follow the locked phase order; don't build the full native installer
 early, don't require cloud storage at install or first launch.
 
+**Vaults are always LOCAL; cloud is BACKUP, not storage (decided
+2026-08-28).** This supersedes spec v2.4 §5's "Relocating the Vault" to a
+cloud drive as a storage mode, and the `switchToCloud()` framing in
+`daemon/vault.mjs`. The Node is the access layer, not the storage layer —
+nothing reads a Vault except the daemon on the same machine, so a remote
+Vault only means "the daemon reads its own files over a network", which buys
+latency and nothing else. **To reach a Vault from elsewhere, run a Node where
+the data should live** (a cloud server), rather than pointing a Node at
+remote files. This also makes unrepresentable the corruption case of two
+Nodes writing one synced folder — the same hazard the Phase L
+install-location rule already covers. `daemon/vault-storage.mjs` is the one
+place Vault reads happen and rejects remote storage explicitly.
+
+Two things this changes that are **not yet built**: backup targets (Google
+Drive, or a user-provisioned Git remote — Git suits the text/metadata tier,
+but years of capture volume will bloat it without bound, so don't offer Git
+for a whole Vault), and **encryption**, which spec §5 already promises
+("cloud providers see encrypted blobs only") and which nothing implements.
+As backup, encryption is the only thing between a third party and raw user
+data — build it before any backup ships, not alongside.
+
 **Vaults are never registered with psyntient.io — by design, permanently,
 not a temporary scoping decision.** Vaults contain private user data;
 psyntient.io never knows where a vault lives (local path, or which cloud
