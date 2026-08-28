@@ -22,22 +22,33 @@ All commands run from the Node root (`/Users/woodleybrown/Psyntient_Node`), **no
 from `Cortex/Open-Claw/` — `working-memory.mjs` and `vault.mjs` resolve
 `Working_Memory/` and `Neural_Vault/` relative to that root.
 
-1. **Start the project.** If the project involves an actual recording/dataset
-   (not pure literature review or discussion), also capture its **modality**
-   — a loose tag, not a validated enum, e.g. `eeg`, `fmri`, `fnirs`, `meg`,
-   `ecog`, `bci`, `hrv`, `eda`, `eye-tracking`, `motion-capture`,
-   `self-report-only`, `mixed`, or whatever actually describes it. Ask the
-   user rather than guessing if it's not obvious from their request.
+1. **Start the project.** Every project must declare its **data types** —
+   required, not optional, and validated against a closed vocabulary. **Ask
+   the user; never guess.**
+
    ```
-   node daemon/working-memory.mjs create-project <project-id> "<title>" [modality]
+   node daemon/working-memory.mjs create-project <project-id> "<title>" <types,comma,separated>
    ```
-   This tag does two things: it lets you (and future analysis sub-agents)
-   pick the right methodology/tooling for this kind of data, and it's the
-   single source of truth that would later gate Archive-eligibility and
-   Observation Packet schema selection once Node API/Archive integration
-   ships (currently paused — see CAPABILITIES.md). Don't try to replicate
-   psyntient.io's exact Observation Packet schema here; this is deliberately
-   loose local metadata, not a validated upload format.
+
+   Valid values (`DATA_TYPES` in `daemon/working-memory.mjs` is the one
+   definition — read it rather than trusting this list if they ever disagree):
+
+   - Recording instruments, any combination: `eeg`, `fmri`, `mri`, `fnirs`,
+     `meg`, `ecog`, `bci`, `hrv`, `eda`, `eye-tracking`, `motion-capture`
+   - `self-report-only` — first-person reports, no instrument record
+   - `none` — planning, reading, analysis of existing work. Cannot be combined
+     with anything else.
+
+   **This is the Archive-eligibility decision, not a hint.** A project that
+   declares no instrument record can never contribute an Observation Packet,
+   because the Archive requires a recording — a report alone is not a packet.
+   Most projects are legitimately `none`, and that is a normal answer, not a
+   lesser one. Say so plainly when it applies rather than steering the user
+   toward a type they do not have.
+
+   Creation fails outright on an empty or unknown type, so a project cannot
+   end up silently uncontributable the way every project made before this
+   change did.
 
    Use `node daemon/working-memory.mjs project-status <project-id>` any time you
    need to check state rather than assuming.
@@ -150,14 +161,15 @@ user of this Node once installed, regardless of what the marketing site's
 If a user asks for archive cross-referencing or Observation Packet workflows, say
 so plainly rather than attempting to simulate them — research projects are still
 fully usable for local analysis of whatever Vault data the user actually has.
-The `modality` tag from step 1 is groundwork for this, not a workaround —
-today it only helps local analysis; it isn't a real Observation Packet and
-nothing currently reads it for Archive purposes.
+The data types from step 1 are what decide whether a project could ever
+contribute: `archiveEligible` in its `.project.json` is derived from them. The
+Archive itself is reachable now (see the `archive_*` tools in
+CAPABILITIES.md), but contributing *to* it is not built yet — reading is.
 
 ## Primary domain, general-purpose tool
 
 This skill's primary edict is consciousness / neurophenomenological research
-— that's what the modality list above is drawn from, and what to assume when
+— that's what the data-type list above is drawn from, and what to assume when
 a request is ambiguous. But the mechanism itself (plan → protocol → analyze →
 write up → sync) is general-purpose: use it for any kind of research the user
 asks for, not just neuro/consciousness work.

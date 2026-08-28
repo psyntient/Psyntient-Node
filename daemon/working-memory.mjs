@@ -153,12 +153,76 @@ export function resolveProjectArtifact(projectId, filename) {
   return null;
 }
 
+/**
+ * Data types a project can hold, and the eligibility rule that falls out.
+ *
+ * This is a CLOSED vocabulary on purpose. It mirrors what psyntient.io/archive
+ * says the Archive accepts, so choosing types at project creation IS the
+ * Archive-eligibility decision -- there is no second flag to keep in sync, and
+ * no way to end up with a project whose stated contents the Archive has never
+ * heard of.
+ *
+ * `archiveEligible: false` is not a lesser choice. Most research projects are
+ * planning, literature review or analysis and legitimately hold no instrument
+ * record; the Archive requires one ("a new archetype is never defined from
+ * neural data alone" cuts the other way too -- a report alone is not a packet).
+ * Saying so explicitly is better than leaving it unset and discovering later.
+ */
+export const DATA_TYPES = [
+  { id: "eeg", label: "EEG", archiveEligible: true },
+  { id: "fmri", label: "fMRI", archiveEligible: true },
+  { id: "mri", label: "Structural MRI", archiveEligible: true },
+  { id: "fnirs", label: "fNIRS", archiveEligible: true },
+  { id: "meg", label: "MEG", archiveEligible: true },
+  { id: "ecog", label: "ECoG", archiveEligible: true },
+  { id: "bci", label: "Brain–computer interface", archiveEligible: true },
+  { id: "hrv", label: "Heart rate / HRV", archiveEligible: true },
+  { id: "eda", label: "Skin conductance (EDA)", archiveEligible: true },
+  { id: "eye-tracking", label: "Eye tracking", archiveEligible: true },
+  { id: "motion-capture", label: "Motion capture", archiveEligible: true },
+  { id: "self-report-only", label: "First-person report only", archiveEligible: false },
+  { id: "none", label: "No recorded data (planning, analysis, reading)", archiveEligible: false },
+];
+
+const DATA_TYPE_IDS = new Set(DATA_TYPES.map((t) => t.id));
+
+/** Throws on anything outside the vocabulary, so a typo cannot silently create an unusable project. */
+export function normalizeDataTypes(input) {
+  const list = Array.isArray(input) ? input : input ? [input] : [];
+  const cleaned = [...new Set(list.map((v) => String(v).trim().toLowerCase()).filter(Boolean))];
+  if (cleaned.length === 0) {
+    throw new Error(
+      `A project must declare its data types. Choose one or more of: ${[...DATA_TYPE_IDS].join(", ")}`,
+    );
+  }
+  const unknown = cleaned.filter((v) => !DATA_TYPE_IDS.has(v));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown data type(s): ${unknown.join(", ")}. Valid: ${[...DATA_TYPE_IDS].join(", ")}`,
+    );
+  }
+  // "none" means no recorded data, so it cannot be combined -- a project that
+  // holds EEG does not also hold nothing.
+  if (cleaned.includes("none") && cleaned.length > 1) {
+    throw new Error(`"none" cannot be combined with other data types.`);
+  }
+  return cleaned;
+}
+
+/** A project can contribute only if it declares at least one instrument record. */
+export function isArchiveEligible(dataTypes) {
+  const eligible = new Set(DATA_TYPES.filter((t) => t.archiveEligible).map((t) => t.id));
+  return (dataTypes ?? []).some((t) => eligible.has(t));
+}
+
 // Scaffolds both the Working_Memory working copy and the Vault's
 // permanent Devices/<device>/<project>/ home. Idempotent — safe to call
 // again for an existing project (never overwrites notes.md or an
 // existing .project.json).
-export function createProject({ projectId, title, modality }) {
+export function createProject({ projectId, title, dataTypes }) {
   assertSafeId(projectId, "projectId");
+  // Validate BEFORE any mkdir: a rejected project must leave nothing behind.
+  const types = normalizeDataTypes(dataTypes);
 
   const workDir = workingProjectDir(projectId);
   fs.mkdirSync(workDir, { recursive: true });
@@ -185,12 +249,11 @@ export function createProject({ projectId, title, modality }) {
           title: title || projectId,
           device: deviceName(),
           createdAt: new Date().toISOString(),
-          // Loose, not a validated enum -- see research-agent SKILL.md.
-          // Lets the skill pick the right methodology/tooling for local
-          // analysis today, and is the single source of truth that would
-          // gate Archive-eligibility + Observation Packet schema selection
-          // once Node API/Archive integration exists (currently paused).
-          modality: modality || null,
+          // Declared at creation and validated against DATA_TYPES. This is
+          // the Archive-eligibility decision itself, not a hint: nothing can
+          // be contributed from a project that declares no instrument record.
+          dataTypes: types,
+          archiveEligible: isArchiveEligible(types),
         },
         null,
         2,
@@ -424,7 +487,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(syncThreadHistory(threadId, messages)));
     } else if (cmd === "create-project" && rest[0]) {
       console.log(
-        JSON.stringify(createProject({ projectId: rest[0], title: rest[1], modality: rest[2] })),
+        JSON.stringify(createProject({ projectId: rest[0], title: rest[1], dataTypes: (rest[2] ?? "").split(",") })),
       );
     } else if (cmd === "sync-project" && rest[0]) {
       console.log(JSON.stringify(syncProjectToVault(rest[0])));
@@ -440,7 +503,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify(resolveProjectArtifact(rest[0], rest[1])));
     } else {
       console.log(
-        "Usage: node daemon/working-memory.mjs ensure-scaffold | list-threads | sync-thread <threadId> (messages JSON on stdin) | create-project <projectId> [title] [modality] | sync-project <projectId> | erase-project <projectId> | project-status <projectId> | list-projects | project-detail <projectId> | resolve-artifact <projectId> <filename>",
+        "Usage: node daemon/working-memory.mjs ensure-scaffold | list-threads | sync-thread <threadId> (messages JSON on stdin) | create-project <projectId> <title> <dataTypes,comma,separated> | sync-project <projectId> | erase-project <projectId> | project-status <projectId> | list-projects | project-detail <projectId> | resolve-artifact <projectId> <filename>",
       );
       process.exitCode = 1;
     }

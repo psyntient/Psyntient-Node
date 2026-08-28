@@ -459,6 +459,96 @@ Two rules, the second easy to miss:
    never leak that is for transcripts to be structurally outside the
    contribution path, not carefully filtered on the way in.
 
+## Contribution path: the ingestion queue (read from the live system, 2026-08-28)
+
+Contributing is **asynchronous and reviewable**, not a write into the Archive.
+From the queue's own README on the droplet:
+
+```
+Neural Vault project (on a Node)
+  -> Observation Packet
+    -> POST /api/v1/ingest/packets
+      -> Ingestion_Queue/pending/<submission_id>.json
+        -> Architect reviews + ingests into its own archive
+          -> moves to ingested/ (or rejected/, with a reason)
+            -> next Edition cut eventually republishes it
+```
+
+Three consequences that change how the UI must behave:
+
+1. **Nothing appears immediately.** `IngestAccepted.status` is documented as
+   "always 'pending' on acceptance". Contributed data shows up in a *future
+   Edition*, not the current one, so a UI that says "contributed" and implies
+   "in the Archive" is lying. Track the `submission_id` and poll
+   `GET /api/v1/ingest/status/{id}`.
+2. **Submissions can be rejected**, with a reason, into `rejected/`. A
+   researcher whose contribution was declined has to be able to find out --
+   silently dropping it would be worse than never offering to contribute.
+3. **Consent travels inside the packet** (`consent_state`), not alongside it.
+
+### The Observation Packet shape
+
+From `IngestSubmission.packet` in the live OpenAPI spec:
+
+```
+session_id, timestamp, duration_seconds, neural_data, report_text,
+context_tags, modalities, consent_state, schema_version
+```
+
+described as *"the same JSON shape a Neural Vault project produces"* — so
+`sessions/` is meant to hold files already in packet form, and `modalities`
+there is the packet-level counterpart of a project's declared `dataTypes`.
+
+**The ledger uses this**: it classifies each file in `sessions/` as packet or
+not, so `contributable` means "a submission could actually be built today"
+rather than merely "some files exist". A project full of raw `.edf` recordings
+is not contributable until something converts them, and counting those as
+ready would make auto-sync promise a submission it cannot assemble.
+
+**Not built yet:** the conversion from raw capture to packet, and the
+contribution call itself. The Node can read the Archive; it cannot write to it.
+
+## Vault ledger — `daemon/vault-ledger.mjs`
+
+An index of what a Vault holds and which of it the Archive could accept, so
+neither Cortex ("what's in my Vault?" is already a suggestion chip) nor
+auto-sync has to walk the whole Vault.
+
+- **Derived, never authoritative.** The filesystem and each project's
+  `.project.json` are the truth; this caches a walk over them. Reads report
+  staleness and rescan by default, because a ledger trusted as authority goes
+  quietly wrong as files move.
+- **Index only** — paths, types, counts, sizes. Never file contents.
+- Resolved through `getVaultRoot()`, so it follows a relocated or cloud Vault
+  rather than assuming `Neural_Vault/`.
+- Eligibility comes from `sessions/` alone, and `archiveEligible` is
+  recomputed from declared types rather than trusted from a stored flag.
+- Keeps the `Devices/<device>/` partition: two devices can hold different
+  projects under the same id, and flattening would merge unrelated research.
+
+## Queued: auto-sync toggles (requested 2026-08-28, not yet built)
+
+Two controls, both defaulting **off**:
+
+1. **Per-project**, on the project page: auto-sync this project's captures to
+   the Archive. Shown only when the project is `archiveEligible` — for a
+   planning or literature-review project the control is absent, not disabled.
+2. **Global**, in Settings: auto-sync every Archive-compatible project.
+
+Decisions to make when building, not to guess at now:
+
+- **How the two interact.** Cleanest is that the global toggle sets the
+  *default* for newly created eligible projects, and a per-project setting
+  always wins once set. A global master switch that silently overrides an
+  explicit per-project "no" would be a consent bug, not a convenience.
+- **Off is the only safe default**, and it must stay off through upgrades. A
+  contribution is irreversible: Editions are immutable and published, so an
+  accidentally-enabled auto-sync cannot be undone by turning it back off.
+- **Still record every push.** Auto-sync changes who initiates a contribution,
+  not whether it is accounted for -- the user must be able to see exactly what
+  left their Vault and when.
+- Only `sessions/` is ever the payload, same as manual contribution.
+
 ## Blocked on
 
 SSH to the droplet. `ssh root@147.182.188.20` refuses publickey; a public key

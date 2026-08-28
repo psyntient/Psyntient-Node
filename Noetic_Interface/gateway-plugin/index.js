@@ -122,6 +122,111 @@ export default {
   id: "psyntient",
 
   register(api) {
+    // --- Cortex's Archive tools ------------------------------------------
+    // Four intent-shaped tools rather than the API's ten REST routes.
+    // Handing a model raw endpoints makes it do query planning across an HTTP
+    // API, which is what models are worst at, and costs a turn per hop.
+    //
+    // `parameters` is hand-written JSON Schema, not TypeBox. Core treats it as
+    // a plain Record and normalizes it as JSON Schema (agent-tools.schema.ts);
+    // Value.Check only appears in tests. That matters because this plugin
+    // lives outside the OpenClaw tree and cannot resolve typebox.
+    //
+    // Design and rationale: ARCHIVE_INTEGRATION.md.
+    const archiveTool = (definition) => api.registerTool(definition, { name: definition.name });
+    const text = (value) => ({
+      content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
+      details: typeof value === "string" ? {} : value,
+    });
+
+    archiveTool({
+      name: "archive_map",
+      label: "Archive map",
+      description:
+        "Orient in the Noetic Archive: the current Edition and the full archetype index (id, name, description, how many exemplars support it). Call this first -- archetypes are the Archive's primary semantic objects and the index is small and stable, so it is cheaper than searching blind.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      execute: async () => {
+        const archive = await daemonModule("archive-client.mjs");
+        return text(await archive.getMap());
+      },
+    });
+
+    archiveTool({
+      name: "archive_search",
+      label: "Search the Archive",
+      description:
+        "Search the Noetic Archive in plain language. Returns matching archetypes and packets with their ids. Use archive_get for the full record of anything worth reading closely.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Plain-language description of what to look for." },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const archive = await daemonModule("archive-client.mjs");
+        return text(await archive.search(String(params?.query ?? "")));
+      },
+    });
+
+    archiveTool({
+      name: "archive_get",
+      label: "Read an Archive record",
+      description:
+        "Fetch one full Archive record by id -- an archetype (e.g. NA-0012-grand-vastness-awe) or a packet. You do not need to know which kind it is.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string", description: "Archetype or packet id." } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const archive = await daemonModule("archive-client.mjs");
+        return text(await archive.getRecord(String(params?.id ?? "")));
+      },
+    });
+
+    archiveTool({
+      name: "archive_pin",
+      label: "Pin Archive records to a project",
+      description:
+        "Record Archive records into a project as citations, with the Edition they came from. Do this whenever an analysis or a claim rests on Archive material: the Node does not keep a copy of the Archive, and the Archive is append-only with revocable consent, so re-running the same query later is not guaranteed to return the same thing.",
+      parameters: {
+        type: "object",
+        properties: {
+          projectId: { type: "string", description: "Project to cite into, e.g. thesis-chapter-3." },
+          ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Archetype or packet ids the analysis actually used.",
+          },
+          query: { type: "string", description: "The question these records were found for." },
+        },
+        required: ["projectId", "ids"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const archive = await daemonModule("archive-client.mjs");
+        const wm = await daemonModule("working-memory.mjs");
+        const ids = Array.isArray(params?.ids) ? params.ids.map(String) : [];
+        if (ids.length === 0) {
+          return text("No ids given, so nothing was pinned.");
+        }
+        // Fetch the records rather than trusting ids the model may have
+        // mistyped: a citation to a record that does not exist is worse than
+        // no citation, because it reads as verified.
+        const records = await Promise.all(ids.map((id) => archive.getRecord(id)));
+        const { edition } = await archive.getMap();
+        const result = wm.pinCitation(String(params.projectId), {
+          edition,
+          query: params?.query ? String(params.query) : null,
+          records,
+        });
+        return text(result);
+      },
+    });
+
     // --- Onboarding gate state -------------------------------------------
     // GET  -> { hasProvider, isPaired, completed }
     // POST -> { action: "complete" }
@@ -252,7 +357,7 @@ export default {
         // threads stay reachable without a rewrite.
         const ensureDefault = () => {
           if (!wm.listProjects().some((p) => p.projectId === DEFAULT_PROJECT_ID)) {
-            wm.createProject({ projectId: DEFAULT_PROJECT_ID, title: "General" });
+            wm.createProject({ projectId: DEFAULT_PROJECT_ID, title: "General", dataTypes: ["none"] });
           }
         };
 
@@ -262,6 +367,9 @@ export default {
             ok: true,
             projects: wm.listProjects(),
             defaultId: DEFAULT_PROJECT_ID,
+            // The creation form renders from this rather than a hardcoded copy,
+            // so the vocabulary has exactly one definition (working-memory.mjs).
+            dataTypes: wm.DATA_TYPES,
           });
         }
 
@@ -275,8 +383,21 @@ export default {
             if (!title) return sendJson(res, 400, { ok: false, error: "title required" });
             const id = slugifyProjectId(title);
             if (!id) return sendJson(res, 400, { ok: false, error: "title has no usable characters" });
-            wm.createProject({ projectId: id, title });
-            return sendJson(res, 200, { ok: true, project: { projectId: id, title } });
+            // Data types are required, and createProject validates them against
+            // the closed vocabulary before creating anything -- a rejected
+            // project must not leave a half-scaffolded directory behind.
+            try {
+              const project = wm.createProject({ projectId: id, title, dataTypes: body.dataTypes });
+              return sendJson(res, 200, {
+                ok: true,
+                project: { projectId: id, title, ...project },
+              });
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
 
           if (!projectId) return sendJson(res, 400, { ok: false, error: "projectId required" });
