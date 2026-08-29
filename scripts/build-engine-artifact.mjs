@@ -14,6 +14,14 @@
 // rot silently on the next engine update, in exactly the way that produces an
 // artifact which installs cleanly and breaks on first use.
 //
+// TWO METHODS, BECAUSE EACH IS BLIND WHERE THE OTHER SEES
+// Probing catches CommonJS require(), but only along paths a probe exercises.
+// Scanning the bundle for import() sites catches every lazy-load site whether
+// or not anything runs it, but cannot see require() at all. Measured: probing
+// alone shipped an artifact without `typescript`, which dist/agent-core imports
+// dynamically during real agent work -- a path no probe reaches without a
+// provider key. So the bundle scan seeds, and probing fills the rest.
+//
 // "What runs" means every path the installer and updater reach, not just the
 // gateway. Deriving from `gateway run` alone missed `models auth
 // paste-api-key`, `config get` and `gateway install` -- all of which the
@@ -170,6 +178,26 @@ const PROBES = [
   { name: "doctor", argv: ["doctor"] },
 ];
 
+/** Packages the bundle loads via a bare dynamic import(), which no probe is
+ *  guaranteed to reach. */
+function seedFromBundleImports() {
+  const added = [];
+  const distDir = path.join(engineDir, "dist");
+  for (const file of fs.readdirSync(distDir)) {
+    if (!file.endsWith(".js")) continue;
+    const src = fs.readFileSync(path.join(distDir, file), "utf8");
+    for (const m of src.matchAll(/import\(\s*["']([^."'][^"']*)["']\s*\)/g)) {
+      const spec = m[1];
+      if (spec.startsWith("node:")) continue;
+      const pkg = packageOf(spec);
+      // Node builtins appear unprefixed too (http, crypto); they have no
+      // package directory, so copyPackage simply declines them.
+      if (copyPackage(pkg)) added.push(pkg);
+    }
+  }
+  return added;
+}
+
 async function main() {
   if (!fs.existsSync(path.join(engineDir, "openclaw.mjs"))) {
     throw new Error(`not an engine checkout: ${engineDir}`);
@@ -206,6 +234,22 @@ async function main() {
   for (const name of fs.readdirSync(path.join(fullModules, "@openclaw"))) {
     copyPackage(`@openclaw/${name}`);
   }
+
+  // Seed from the bundle's own dynamic import() sites before probing.
+  //
+  // The two methods have COMPLEMENTARY blind spots, and neither is sufficient:
+  //
+  //  - Derivation sees CommonJS require() (a resolution hook cannot), but only
+  //    on the paths a probe actually exercises.
+  //  - Scanning dist for import("...") sees every lazy-load site regardless of
+  //    whether anything runs it, but cannot see require() at all.
+  //
+  // Measured: an artifact derived from probes alone shipped without
+  // `typescript`, which dist/agent-core imports dynamically and which is loaded
+  // during real agent work -- a path no probe reaches without a provider key.
+  // It would have installed cleanly and failed on first use.
+  const seeded = seedFromBundleImports();
+  if (seeded.length) log(`seeded ${seeded.length} lazily-imported package(s) from dist`);
 
   let added = 0;
   for (const probe of PROBES) {
