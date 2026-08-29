@@ -107,6 +107,13 @@ is "local HEAD ≠ remote HEAD", so a successful update self-terminates. Only a
 automatically. A lock file makes it single-flight — two tabs refreshing with
 auto-update on would otherwise start two updates against one working tree.
 
+**Rollback cannot strand a Node**, because it returns to the sha the updater
+was running from — which contains the updater. The one way to lose it is a
+manual `git reset --hard` past the commit that introduced it (found by doing
+exactly that during testing: the running process survived, since ESM had the
+module in memory, but the file was gone for the next invocation). A future
+commit that deletes or renames `updater.mjs` would have the same effect.
+
 **A dirty tree refuses rather than stashing.** Local edits ending up somewhere
 the user will not look for them is worse than declining to update.
 

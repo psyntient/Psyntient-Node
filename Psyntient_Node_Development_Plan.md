@@ -93,5 +93,3 @@ A → B → C → E → D → F → G–I → J–L
 ---
 
 *Spec v2.4 wins on product conflicts.*
-
-<!-- update-test marker: safe to remove -->
