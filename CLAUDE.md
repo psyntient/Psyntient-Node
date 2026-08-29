@@ -77,6 +77,45 @@ Rule of thumb: **if the change is not confined to `src/gateway/`, use `full`.**
 And after either profile, re-run `node scripts/ui.js build` — `gatewayWatch`
 wipes `dist/control-ui/` and does not repopulate it.
 
+## 11. Self-update (`daemon/updater.mjs`)
+
+A Node updates by pulling this repo, so the transfer is already proportional
+to the change — git sends changed objects, not a release image. What is *not*
+proportional is the build, so the updater classifies the diff and does the
+least work that applies it:
+
+| Changed | Build | Restart |
+|---|---|---|
+| docs, data | none | no |
+| `ui/src/**` | `ui.js build` | **no** — the control UI is served from disk per request |
+| `src/gateway/**` | `gatewayWatch` + `ui.js build` | yes |
+| `src/**`, `packages/**`, `plugins/**` | `full` + `ui.js build` | yes |
+| `daemon/**`, gateway plugin | none | **yes** — `daemonModule` is a dynamic `import()` with a stable URL, and ESM caches by URL |
+
+Those last two rules are the ones worth not breaking: a UI patch that restarts
+the Gateway is a needless interruption, and a daemon patch that *doesn't*
+restart it silently keeps running the old code.
+
+**Rollback is a file swap, not a rebuild.** `dist/` is snapshotted to
+`dist.prev` before the update (APFS clonefile where available, so it is instant
+and costs no disk until something diverges). Rebuilding to undo a bad update
+would cost up to 20 minutes at the moment the app is already broken.
+
+**Loop safety** is by recorded target, not by detecting relaunches. The check
+is "local HEAD ≠ remote HEAD", so a successful update self-terminates. Only a
+*failed* update can loop, so failures record their sha and are not retried
+automatically. A lock file makes it single-flight — two tabs refreshing with
+auto-update on would otherwise start two updates against one working tree.
+
+**A dirty tree refuses rather than stashing.** Local edits ending up somewhere
+the user will not look for them is worse than declining to update.
+
+**Known non-incremental piece:** `Cortex/Open-Claw/` is gitignored here and the
+fork travels as one binary bundle, so *any* fork change re-transfers ~880 KB.
+As of 2026-08-29 that is 5.9 MB of a 16 MB repo across 7 bundle revisions. The
+fix is a Psyntient-owned fork remote (RESTORE.md says the same); `OPENCLAW_SOURCE`
+in `updater.mjs` is the seam where it gets swapped.
+
 ## Safe OpenClaw update procedure
 
 1. Stop the Gateway service.
