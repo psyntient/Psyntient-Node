@@ -191,6 +191,34 @@ Verify after any upstream update: `openclaw --version`, `openclaw health`,
 `curl -fsS http://127.0.0.1:18789/readyz`, `openclaw gateway status --deep --json`,
 `openclaw doctor --lint --json`, plus the four invariants in rules 2–6 above.
 
+## The installer must not phone home (decided 2026-08-29)
+
+psyntient.io serves the installer binary and detects the visitor's OS to offer
+the right one. That is the whole of its involvement. **It never performs, drives,
+or observes an install.**
+
+Considered and rejected: having psyntient.io run the install, on the reasoning
+that it is already open in a browser. It would necessarily learn that a Node was
+installed, when, from what IP, and plausibly where on disk — exactly the metadata
+this architecture promises not to hold, and inconsistent with vaults never being
+registered (section 8). Convenience does not justify it.
+
+So after the binary is downloaded, the install talks to **GitHub** (code) and
+**nodejs.org / npm** (runtime and dependencies) only. No install-started ping, no
+install-completed ping, no telemetry, no error reporting to psyntient.io.
+**Pairing remains the single deliberate, user-initiated moment psyntient.io
+learns a Node exists.**
+
+There is also a technical reason the rejected design would not have worked well:
+a page on psyntient.io calling `localhost` is a cross-origin request into the
+private network, requiring CORS and tripping Chrome's Private Network Access
+prompts. The chosen shape — a downloaded binary serving the wizard on localhost,
+with the browser pointed at localhost — is same-origin and avoids both.
+
+The remote-install path (DigitalOcean, later) is different and psyntient.io may
+drive it: that install happens on a server the user provisioned, over an API,
+not on their machine.
+
 ## PWA icons — do not re-declare `maskable`
 
 Settled in v1, re-broken and re-fixed 2026-08-29. Source:
