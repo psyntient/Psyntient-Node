@@ -451,6 +451,85 @@ export default definePluginEntry({
       }),
     });
 
+    // --- Vault file contents -----------------------------------------------
+    // GET ?project=<id>&path=<area/relative/path>[&device=<name>]
+    //
+    // One file at a time, and described rather than dumped: a real capture is
+    // tens of thousands of samples, and neither a browser nor a model is
+    // served by receiving them. The daemon reduces a recording to its shape
+    // (channels, counts, range) and returns text files whole.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/vault/file",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "GET") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        const url = new URL(req.url, "http://localhost");
+        const projectId = url.searchParams.get("project");
+        const filePath = url.searchParams.get("path");
+        if (!projectId || !filePath) {
+          return sendJson(res, 400, { ok: false, error: "project and path required" });
+        }
+        try {
+          const detail = await daemonModule("vault-project.mjs");
+          return sendJson(
+            res,
+            200,
+            await detail.readFile(projectId, filePath, { device: url.searchParams.get("device") }),
+          );
+        } catch (err) {
+          return sendJson(res, 200, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
+    // --- Vault file download -----------------------------------------------
+    // GET ?project=<id>&path=<area/relative/path>[&device=<name>]  -> the bytes
+    //
+    // Separate from /vault/file, which DESCRIBES a file: this hands over the
+    // real thing so a researcher can open their own data in their own tools.
+    // Path containment is enforced by vault-storage.mjs's provider, which
+    // refuses to resolve outside the Vault root -- this route must never grow
+    // its own path handling.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/vault/download",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "GET") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        const url = new URL(req.url, "http://localhost");
+        const projectId = url.searchParams.get("project");
+        const filePath = url.searchParams.get("path");
+        if (!projectId || !filePath) {
+          return sendJson(res, 400, { ok: false, error: "project and path required" });
+        }
+        try {
+          const detail = await daemonModule("vault-project.mjs");
+          const file = await detail.readRaw(projectId, filePath, {
+            device: url.searchParams.get("device"),
+          });
+          if (!file.ok) return sendJson(res, 404, file);
+          res.writeHead(200, {
+            "Content-Type": file.contentType,
+            "Content-Length": file.bytes.length,
+            // Downloads only; never rendered inline in the app's own origin.
+            "Content-Disposition": `attachment; filename="${file.name}"`,
+          });
+          return res.end(file.bytes);
+        } catch (err) {
+          return sendJson(res, 500, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
     // --- Archive semantic search ------------------------------------------
     // GET ?query=<text>  -> Server-Sent Events: stage updates, then a result.
     //
