@@ -117,11 +117,29 @@ commit that deletes or renames `updater.mjs` would have the same effect.
 **A dirty tree refuses rather than stashing.** Local edits ending up somewhere
 the user will not look for them is worse than declining to update.
 
-**Known non-incremental piece:** `Cortex/Open-Claw/` is gitignored here and the
-fork travels as one binary bundle, so *any* fork change re-transfers ~880 KB.
-As of 2026-08-29 that is 5.9 MB of a 16 MB repo across 7 bundle revisions. The
-fix is a Psyntient-owned fork remote (RESTORE.md says the same); `OPENCLAW_SOURCE`
-in `updater.mjs` is the seam where it gets swapped.
+**The engine has its own remote (2026-08-29):**
+`github.com/psyntient/Open-Claw-Forked`, branch `psyntient`, remote name
+`psyntient-fork`. `origin` inside `Cortex/Open-Claw/` still points at upstream
+`openclaw/openclaw` and must stay that way — that is how upstream updates are
+fetched later.
+
+It is a GitHub fork, so it shares storage with the parent: pushing our branch
+moved only our own commits, in eight seconds, rather than the 2.1 GB a
+standalone repo would have required. It is public, so **a Node pulls updates
+with no credentials**; the token at `~/.psyntient/psyntient-git-token` is
+needed only to push.
+
+This replaced distributing the fork as a committed binary bundle, under which
+*any* fork change re-transferred ~880 KB because bundles do not delta — 5.9 MB
+of a 16 MB repo across 7 revisions, to ship changes that were often two lines.
+The bundle survives as an offline recovery artifact and is no longer refreshed
+per commit.
+
+Because the repo and the engine now move independently, the updater checks both
+and rolls back both. Rollback restoring the engine is not optional: it used to
+happen implicitly when the bundle file reverted with the repo, and with a real
+remote a failed update would otherwise leave an advanced engine behind a
+rolled-back Node.
 
 ## Updating OpenClaw itself (upstream) — read before touching this
 
