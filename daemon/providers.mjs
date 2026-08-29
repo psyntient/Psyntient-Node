@@ -130,9 +130,17 @@ export async function setProviderKey(providerId, apiKey) {
   const existing = await jsonCommand(["models", "auth", "list", "--provider", providerId], { timeoutMs: 45000 });
   const profileId = existing?.profiles?.[0]?.id || `${providerId}:manual`;
 
+  // 90s, not runCli's 20s default. Every other CLI call in this file was
+  // already raised past that default -- 45s for the auth listings, 30s for the
+  // config writes -- and this one, the call that actually stores the key, was
+  // left on it. It failed a real install at twelve minutes in, on the
+  // second-to-last phase, on a machine under memory pressure.
+  //
+  // Generous on purpose: a timeout here does not cost a retry, it costs the
+  // whole install, and the cost of waiting longer than necessary is nothing.
   const result = await runCli(
     ["models", "auth", "paste-api-key", "--provider", providerId, "--profile-id", profileId],
-    { input: apiKey.trim() }
+    { input: apiKey.trim(), timeoutMs: 90000 }
   );
   if (result.code !== 0) {
     throw new Error(`Failed to save ${providerId} key: ${result.stderr || result.stdout}`);
@@ -159,8 +167,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     const apiKey = Buffer.concat(chunks).toString("utf8").trim();
-    await setProviderKey(providerId, apiKey);
-    console.log(`Saved ${providerId} key and restarted the Gateway.`);
+    try {
+      await setProviderKey(providerId, apiKey);
+      console.log(`Saved ${providerId} key and restarted the Gateway.`);
+    } catch (err) {
+      // An uncaught rejection here prints a Node stack trace, which the
+      // installer captures from stderr and shows to the user verbatim -- so a
+      // setup wizard ended a twelve-minute install with "at Timeout._onTimeout
+      // (file:///.../openclaw-cli.mjs:33:14)". Say what happened instead.
+      console.error(err?.message ?? String(err));
+      process.exitCode = 1;
+    }
   } else {
     console.log("Usage: echo \"$API_KEY\" | node daemon/providers.mjs add <provider>");
     console.log(`Supported: ${SUPPORTED_PROVIDERS.map((p) => p.id).join(", ")}`);
