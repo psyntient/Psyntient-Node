@@ -123,6 +123,56 @@ As of 2026-08-29 that is 5.9 MB of a 16 MB repo across 7 bundle revisions. The
 fix is a Psyntient-owned fork remote (RESTORE.md says the same); `OPENCLAW_SOURCE`
 in `updater.mjs` is the seam where it gets swapped.
 
+## Updating OpenClaw itself (upstream) — read before touching this
+
+Researched against `Cortex/Open-Claw/docs/install/updating.md` (2026-08-29).
+This is a DIFFERENT operation from `daemon/updater.mjs`, which only ships our
+own code. Nothing here is automated, deliberately.
+
+**Never run `openclaw update` on this Node.** It manages the checkout and the
+release channel: on a git install it fast-forwards `main` or switches channels,
+which takes the tree off our `psyntient` branch. It also assumes state in
+`~/.openclaw`, while ours lives in `~/.psyntient/openclaw-state`. The right
+reference for our shape is `scripts/update-gateway.sh` (documented under
+"Source-checkout servers"), which fails closed on local changes and rebases a
+local server branch onto `origin/main`.
+
+**Back up before, and verify it.** This is what protects the provider key:
+
+```bash
+openclaw backup create --output ~/Backups/openclaw --verify
+```
+
+The archive includes credentials and auth profiles, so it gets the same
+protection as the live state directory. `openclaw update` keeps a config copy
+but does NOT create a state recovery point.
+
+**`openclaw doctor` migrates config** and must be run after an update — which
+is exactly where rule 6 bites. Always re-verify afterwards:
+
+```
+agents.defaults.workspace = /Users/woodleybrown/Psyntient_Node/Cortex/Cortex_Agent
+```
+
+**Rollback for a source checkout** is `git checkout --detach <known-good>`,
+`pnpm install && pnpm build`, `openclaw gateway restart`. Crossing the session
+SQLite migration downward additionally needs, before starting the older code:
+
+```bash
+openclaw gateway stop
+openclaw doctor --session-sqlite restore --session-sqlite-all-agents
+```
+
+**OpenClaw ships its own auto-updater.** It is off by default and this Node has
+no `update` block, so it is inert today — but nothing prevents it. Setting
+`OPENCLAW_NO_AUTO_UPDATE=1` in the Gateway environment would make it impossible
+for OpenClaw's updater to replace the tree underneath ours. Not set as of
+2026-08-29; worth doing at the next service reinstall.
+
+Verify after any upstream update: `openclaw --version`, `openclaw health`,
+`curl -fsS http://127.0.0.1:18789/readyz`, `openclaw gateway status --deep --json`,
+`openclaw doctor --lint --json`, plus the four invariants in rules 2–6 above.
+
 ## Safe OpenClaw update procedure
 
 1. Stop the Gateway service.
