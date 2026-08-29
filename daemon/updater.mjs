@@ -158,6 +158,62 @@ async function isDirty(cwd) {
 }
 
 
+
+
+/**
+ * Bring the Open-Claw checkout up to the bundle. Returns the files that landed.
+ *
+ * Fetches to FETCH_HEAD with no destination refspec: RESTORE.md's
+ * `psyntient:psyntient` works from a fresh clone, but git refuses to fetch
+ * into the branch that is checked out, which is always the case on a live
+ * Node.
+ */
+async function syncFork() {
+  const branch = await git(OPENCLAW_DIR, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch !== "psyntient") {
+    throw new Error(
+      `Open-Claw is on "${branch}", not the psyntient fork branch; refusing to update it.`,
+    );
+  }
+  const before = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
+  await git(OPENCLAW_DIR, ["fetch", OPENCLAW_SOURCE.path, "psyntient"]);
+  await git(OPENCLAW_DIR, ["merge", "--ff-only", "FETCH_HEAD"]);
+  const after = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
+  if (after === before) return [];
+  return (await git(OPENCLAW_DIR, ["diff", "--name-only", `${before}..${after}`]))
+    .split("\n")
+    .filter(Boolean);
+}
+
+/**
+ * Has the Open-Claw checkout fallen behind the bundle already on disk?
+ *
+ * Uses the LOCAL bundle deliberately, unlike inspectIncomingBundle: the
+ * question here is not "what is coming" but "did what already arrived actually
+ * get applied".
+ */
+async function forkDrift() {
+  try {
+    const head = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
+    const tip = (await git(OPENCLAW_DIR, ["bundle", "list-heads", BUNDLE])).split(/\s+/)[0];
+    if (!tip || tip === head) return null;
+    // Only behind counts. A checkout AHEAD of the bundle is normal during
+    // development and must not be "updated" backwards.
+    const behind = await git(OPENCLAW_DIR, ["rev-list", "--count", `${head}..${tip}`]);
+    if (Number(behind) === 0) return null;
+    return {
+      files: (await git(OPENCLAW_DIR, ["diff", "--name-only", `${head}..${tip}`]))
+        .split("\n")
+        .filter(Boolean),
+      commits: (await git(OPENCLAW_DIR, ["log", "--oneline", `${head}..${tip}`]))
+        .split("\n")
+        .filter(Boolean),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * What the INCOMING bundle carries, without pulling it.
  *
@@ -225,6 +281,31 @@ export async function check() {
   const remote = await git(NODE_ROOT, ["rev-parse", `origin/${branch}`]);
 
   if (local === remote) {
+    // The repo being current does not mean the ENGINE is. Open-Claw is a
+    // separate checkout fed by the bundle, and it can fall behind it -- a
+    // failed fork fetch, or a manual reset. Nothing else would notice, because
+    // the fork is only inspected when the bundle blob differs between local
+    // and remote. Observed for real while testing: the Node reported "up to
+    // date" while its engine was two commits behind its own bundle.
+    const drift = await forkDrift();
+    if (drift) {
+      return {
+        ok: true,
+        upToDate: false,
+        branch,
+        current: local,
+        target: local,
+        commits: [],
+        openclawCommits: drift.commits,
+        files: [],
+        openclawFiles: drift.files,
+        stat: "engine behind bundle",
+        plan: classify(drift.files),
+        dirty: await isDirty(NODE_ROOT),
+        failedBefore: false,
+        forkOnly: true,
+      };
+    }
     return { ok: true, upToDate: true, current: local, branch };
   }
 
@@ -365,43 +446,32 @@ export async function apply({ onProgress, force = false } = {}) {
     say("snapshot", "saving the current build", 8);
     snapped = await snapshotDist();
 
-    say("pulling", `${status.commits.length} commit(s)`, 15);
-    // Fast-forward only: a merge commit created by an updater is a repo state
-    // nobody asked for and rollback cannot reason about.
-    await git(NODE_ROOT, ["merge", "--ff-only", `origin/${status.branch}`]);
+    if (status.forkOnly) {
+      // Nothing to pull: the repo is current and only the engine lags behind
+      // the bundle already on disk.
+      say("fork", "catching the engine up", 25);
+      const landed = await syncFork();
+      Object.assign(plan, classify(landed));
+    } else {
+      say("pulling", `${status.commits.length} commit(s)`, 15);
+      // Fast-forward only: a merge commit created by an updater is a repo
+      // state nobody asked for and rollback cannot reason about.
+      await git(NODE_ROOT, ["merge", "--ff-only", `origin/${status.branch}`]);
 
-    if (status.files.some((f) => f.endsWith(".bundle")) && OPENCLAW_SOURCE.kind === "bundle") {
-      say("fork", "restoring the OpenClaw fork", 25);
-      const branch = await git(OPENCLAW_DIR, ["rev-parse", "--abbrev-ref", "HEAD"]);
-      if (branch !== "psyntient") {
-        throw new Error(
-          `Open-Claw is on "${branch}", not the psyntient fork branch; refusing to update it.`,
-        );
-      }
-      // No destination refspec. RESTORE.md fetches `psyntient:psyntient`, which
-      // works from a fresh clone but git REFUSES on a live Node -- you cannot
-      // fetch into the branch that is checked out. Fetch to FETCH_HEAD and
-      // fast-forward the working branch instead.
-      const beforeFork = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
-      await git(OPENCLAW_DIR, ["fetch", OPENCLAW_SOURCE.path, "psyntient"]);
-      await git(OPENCLAW_DIR, ["merge", "--ff-only", "FETCH_HEAD"]);
-      const afterFork = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
-
-      // Re-derive from what actually landed. The pre-pull plan is a preview
-      // built from an inspected copy of the bundle; this is ground truth, and
-      // the build decision should never rest on the preview when the real
-      // answer is now available for free.
-      if (afterFork !== beforeFork) {
-        const forkFiles = (
-          await git(OPENCLAW_DIR, ["diff", "--name-only", `${beforeFork}..${afterFork}`])
-        )
-          .split("\n")
-          .filter(Boolean);
-        const merged = classify([...status.files, ...forkFiles]);
-        plan.buildOpenclaw = merged.buildOpenclaw;
-        plan.buildUi = plan.buildUi || merged.buildUi;
-        plan.restart = plan.restart || merged.restart;
-        plan.reasons = merged.reasons;
+      if (status.files.some((f) => f.endsWith(".bundle")) && OPENCLAW_SOURCE.kind === "bundle") {
+        say("fork", "updating the engine", 25);
+        const landed = await syncFork();
+        if (landed.length > 0) {
+          // Re-derive from what actually landed. The pre-pull plan is a
+          // preview built from an inspected copy of the bundle; this is ground
+          // truth, and the build decision should never rest on a prediction
+          // when the real answer is available for free.
+          const merged = classify([...status.files, ...landed]);
+          plan.buildOpenclaw = merged.buildOpenclaw;
+          plan.buildUi = plan.buildUi || merged.buildUi;
+          plan.restart = plan.restart || merged.restart;
+          plan.reasons = merged.reasons;
+        }
       }
     }
 
