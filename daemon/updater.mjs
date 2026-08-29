@@ -21,6 +21,7 @@
 // instant and costs no disk until something diverges.
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -116,21 +117,27 @@ function releaseLock() {
 // --- classification -------------------------------------------------------
 
 /**
- * What has to be rebuilt and restarted, given the files that changed.
+ * What has to be fetched and restarted, given the files that changed.
  *
  * The rules are load-bearing and were verified rather than assumed:
  *  - The control UI is served from disk per request, so a UI-only change needs
- *    a rebuild and a browser reload, NOT a gateway restart.
+ *    a browser reload, NOT a gateway restart.
  *  - daemon/*.mjs reach the gateway through a dynamic import() with a stable
  *    URL, and ESM caches by URL -- so daemon changes DO need a restart even
  *    though nothing is compiled.
- *  - Anything outside src/gateway/ needs the `full` profile. CLAUDE.md
- *    documents why: gatewayWatch runs one tsdown step and leaves a fresh
- *    gateway running against a stale AI runtime, which fails as tool calls
- *    dying with no mention of the build.
+ *  - ANY change to compiled source means fetching a new artifact, including a
+ *    UI-only one: dist/control-ui is built into the artifact, so there is no
+ *    such thing as a UI change this Node can apply on its own.
+ *
+ * The old gatewayWatch/full distinction is gone. It existed because building
+ * locally was expensive enough to be worth optimising, and CLAUDE.md documents
+ * the trap it created -- gatewayWatch leaving a fresh gateway on a stale AI
+ * runtime, failing as tool calls dying with no mention of the build. With one
+ * artifact per engine commit both cases fetch the same bytes, so the trap
+ * cannot be fallen into.
  */
 export function classify(files) {
-  const plan = { buildOpenclaw: null, buildUi: false, restart: false, reasons: [] };
+  const plan = { fetchArtifact: false, buildUi: false, restart: false, reasons: [] };
   const add = (reason) => {
     if (!plan.reasons.includes(reason)) plan.reasons.push(reason);
   };
@@ -140,22 +147,85 @@ export function classify(files) {
       plan.restart = true;
       add("daemon or plugin code changed (loaded once per gateway process)");
     } else if (f.startsWith("ui/src/") || f.startsWith("Cortex/Open-Claw/ui/")) {
+      // buildUi means "the interface changed, a browser should reload" -- it is
+      // no longer work to perform, because the new interface arrives inside the
+      // artifact.
+      plan.fetchArtifact = true;
       plan.buildUi = true;
       add("control UI changed");
     } else if (f.startsWith("src/gateway/")) {
-      plan.buildOpenclaw = plan.buildOpenclaw === "full" ? "full" : "gatewayWatch";
-      plan.buildUi = true; // gatewayWatch wipes dist/control-ui and does not repopulate it
+      plan.fetchArtifact = true;
+      plan.buildUi = true;
       plan.restart = true;
       add("gateway source changed");
     } else if (f.startsWith("src/") || f.startsWith("packages/") || f.startsWith("plugins/")) {
-      plan.buildOpenclaw = "full";
+      plan.fetchArtifact = true;
       plan.buildUi = true;
       plan.restart = true;
-      add("agent runtime, packages or plugins changed (full build required)");
+      add("agent runtime, packages or plugins changed");
     }
   }
   if (plan.reasons.length === 0) plan.reasons.push("documentation or data only");
   return plan;
+}
+
+// --- prebuilt engine ------------------------------------------------------
+
+/** Where CI publishes builds. Public, so this needs no credentials — the same
+ *  property the git fetches rely on. */
+const ARTIFACT_REPO = "psyntient/Psyntient-Node";
+
+function artifactUrl(engineSha) {
+  const short = engineSha.slice(0, 8);
+  return `https://github.com/${ARTIFACT_REPO}/releases/download/engine-${engineSha}/psyntient-engine-${short}.tar.gz`;
+}
+
+/**
+ * Downloads the built engine for whatever commit Open-Claw is now on.
+ *
+ * WHY THERE IS NO BUILD FALLBACK
+ * A Node installed from an artifact has dist/ but not the toolchain that made
+ * it — it carries the ~150 MB the runtime loads, not the 1975 MB a build needs.
+ * "Fall back to building" would mean a multi-gigabyte install followed by a
+ * compile that needs more memory than the machines this runs on have. Refusing
+ * is the honest outcome: the Node keeps working on the version it has.
+ *
+ * A missing artifact is an expected state, not a bug. CI may not have finished
+ * publishing a commit that landed minutes ago, so the message says so rather
+ * than surfacing a 404 nobody can act on.
+ */
+async function fetchEngineArtifact() {
+  const sha = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
+  const url = artifactUrl(sha);
+
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) {
+    throw new Error(
+      res.status === 404
+        ? `No prebuilt engine published for ${sha.slice(0, 8)} yet. ` +
+          `The release workflow may still be running; this Node is unchanged and will retry on the next check.`
+        : `Could not download the engine artifact (${res.status}) from ${url}`,
+    );
+  }
+
+  const archive = path.join(NODE_ROOT, "engine-artifact.tar.gz");
+  await fsp.writeFile(archive, Buffer.from(await res.arrayBuffer()));
+  try {
+    // Into the engine dir, over the existing dist/ and node_modules. dist.prev
+    // was snapshotted before any of this, so a bad artifact rolls back the same
+    // way a bad build did.
+    await run("tar", ["-xzf", archive, "-C", OPENCLAW_DIR], { maxBuffer: 32 * 1024 * 1024 });
+  } finally {
+    await fsp.rm(archive, { force: true });
+  }
+
+  // Verify rather than trust the exit code: a truncated download can untar
+  // "successfully" and leave a tree that only fails at the next launch.
+  for (const required of ["dist", "node_modules"]) {
+    if (!fs.existsSync(path.join(OPENCLAW_DIR, required))) {
+      throw new Error(`The engine artifact unpacked without ${required}.`);
+    }
+  }
 }
 
 // --- git helpers ----------------------------------------------------------
@@ -434,51 +504,48 @@ export async function apply({ onProgress, force = false } = {}) {
         // prediction; this is ground truth, and the build decision should
         // never rest on the prediction when the real answer is free.
         const merged = classify([...status.files, ...landed]);
-        plan.buildOpenclaw = merged.buildOpenclaw;
+        plan.fetchArtifact = merged.fetchArtifact;
         plan.buildUi = plan.buildUi || merged.buildUi;
         plan.restart = plan.restart || merged.restart;
         plan.reasons = merged.reasons;
       }
     }
 
-    if (plan.buildOpenclaw) {
-      const full = plan.buildOpenclaw === "full";
-      // A `full` build is ~20 minutes of silence. Without a ticking elapsed
-      // time the bar sits at one number long enough to read as a hang, and a
-      // user kills an update that was working -- which is how a Node ends up
-      // half-updated.
+    if (plan.fetchArtifact) {
+      // A DOWNLOAD, not a build. A Node installed from a prebuilt artifact has
+      // dist/ but not the tooling that produced it -- it ships ~150 MB of
+      // runtime dependencies rather than the 1975 MB a full install needs --
+      // so there is nothing here to compile with even if we wanted to.
+      //
+      // The gatewayWatch/full distinction goes with it. That distinction
+      // existed only because building locally was expensive enough to be worth
+      // optimising; there is one artifact per engine commit, so both cases
+      // fetch the same bytes.
       const startedAt = Date.now();
-      const expected = full ? 20 * 60 * 1000 : 30 * 1000;
+      // Was 20 minutes for a full build. A ~91 MB download is a different
+      // order of magnitude, and an estimate that stale makes the bar crawl and
+      // then stall at 95% of a number it will never approach.
+      const expected = 3 * 60 * 1000;
       const tick = setInterval(() => {
         const elapsed = Date.now() - startedAt;
         const mins = Math.floor(elapsed / 60000);
         const secs = Math.floor((elapsed % 60000) / 1000);
         say(
-          "building",
-          `${full ? "full build" : "gateway build"} — ${mins}m ${String(secs).padStart(2, "0")}s elapsed`,
-          // Eased toward the end of this stage's range, never reaching it, so
-          // motion continues even though the build cannot report from inside.
+          "fetching",
+          `downloading the built app — ${mins}m ${String(secs).padStart(2, "0")}s elapsed`,
           35 + Math.min(0.95, elapsed / expected) * 30,
         );
       }, 1000);
       try {
-        await run(
-          "node",
-          [path.join(OPENCLAW_DIR, "scripts", "build-all.mjs"), plan.buildOpenclaw],
-          { cwd: OPENCLAW_DIR, maxBuffer: 64 * 1024 * 1024 },
-        );
+        await fetchEngineArtifact();
       } finally {
         clearInterval(tick);
       }
     }
-
-    if (plan.buildUi) {
-      say("building-ui", "rebuilding the interface", 70);
-      await run("node", [path.join(OPENCLAW_DIR, "scripts", "ui.js"), "build"], {
-        cwd: OPENCLAW_DIR,
-        maxBuffer: 64 * 1024 * 1024,
-      });
-    }
+    // No separate UI build. dist/control-ui ships inside the artifact, so
+    // fetching it has already replaced the interface. plan.buildUi survives as
+    // a signal that the interface CHANGED -- which is what tells a browser it
+    // needs to reload -- not as work to be done here.
 
     if (plan.restart) {
       say("restarting", "restarting the Gateway", 85);
