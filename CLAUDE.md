@@ -56,6 +56,13 @@ If OpenClaw resets defaults to `~/.openclaw/workspace`, fix it back.
 
 ## Build profiles: `gatewayWatch` is not a substitute for `full`
 
+**This section applies to DEVELOPERS ONLY** (scoped 2026-08-29). Installed
+Nodes no longer build at all — they fetch a prebuilt artifact, so neither
+profile runs on a user's machine and the failure below cannot reach them. It
+remains exactly as true for anyone building this repo by hand, which is why it
+stays.
+
+
 `node scripts/build-all.mjs gatewayWatch` takes ~22s and `full` takes ~20min,
 which makes the fast one very tempting. It is only safe for **gateway-only**
 edits.
@@ -80,17 +87,42 @@ wipes `dist/control-ui/` and does not repopulate it.
 ## 11. Self-update (`daemon/updater.mjs`)
 
 A Node updates by pulling this repo, so the transfer is already proportional
-to the change — git sends changed objects, not a release image. What is *not*
-proportional is the build, so the updater classifies the diff and does the
-least work that applies it:
+to the change — git sends changed objects, not a release image. The updater
+classifies the diff and does the least work that applies it:
 
-| Changed | Build | Restart |
+| Changed | Work | Restart |
 |---|---|---|
 | docs, data | none | no |
-| `ui/src/**` | `ui.js build` | **no** — the control UI is served from disk per request |
-| `src/gateway/**` | `gatewayWatch` + `ui.js build` | yes |
-| `src/**`, `packages/**`, `plugins/**` | `full` + `ui.js build` | yes |
+| `ui/src/**` | **fetch artifact** | **no** — the control UI is served from disk per request |
+| `src/gateway/**` | **fetch artifact** | yes |
+| `src/**`, `packages/**`, `plugins/**` | **fetch artifact** | yes |
 | `daemon/**`, gateway plugin | none | **yes** — `daemonModule` is a dynamic `import()` with a stable URL, and ESM caches by URL |
+
+**A Node no longer builds anything** (changed 2026-08-29). It installs a
+prebuilt engine artifact — `dist/`, the workspace packages' own `dist/` and
+`package.json`, and the ~150 MB of `node_modules` the runtime actually loads,
+against the 1975 MB a full install used to put on disk. So the three rows that
+once said `gatewayWatch` or `full` all fetch the same bytes, and the
+distinction between those profiles is gone from user machines entirely.
+
+That distinction was worth optimising only because building locally was
+expensive: measured, ~30 minutes and a ~9 GB peak, which thrashes an 8 GB
+laptop and failed twice before succeeding. The identical build takes 3m28s in
+CI. Its disappearance also removes the trap documented above — `gatewayWatch`
+leaving a fresh gateway on a stale AI runtime — because that profile no longer
+runs anywhere a user can reach.
+
+Note the UI row: it fetches now. `dist/control-ui` is built INTO the artifact,
+so there is no such thing as a UI-only change a Node can apply by itself.
+`plan.buildUi` survives purely as the signal that the interface changed and a
+browser should reload.
+
+**There is deliberately no build fallback.** A Node that has the artifact does
+not have the toolchain that made it, so falling back would mean a
+multi-gigabyte install followed by a compile needing more memory than these
+machines have. A commit with no published artifact — CI may still be running —
+leaves the Node on the version it has and says so. Full detail:
+`daemon/docs/BUILD_AND_DISTRIBUTION.md`.
 
 Those last two rules are the ones worth not breaking: a UI patch that restarts
 the Gateway is a needless interruption, and a daemon patch that *doesn't*
