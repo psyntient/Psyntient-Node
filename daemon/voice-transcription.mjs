@@ -11,8 +11,9 @@ import path from "node:path";
 import os from "node:os";
 import { pipeline } from "node:stream/promises";
 import { initWhisper } from "@fugood/whisper.node";
+import { psyntientHome } from "./psyntient-home.mjs";
 
-const MODEL_DIR = path.join(os.homedir(), ".psyntient", "models", "whisper");
+const MODEL_DIR = path.join(psyntientHome(), "models", "whisper");
 const MODEL_PATH = path.join(MODEL_DIR, "ggml-base.en.bin");
 const MODEL_URL =
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";

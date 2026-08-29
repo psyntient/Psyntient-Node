@@ -33,6 +33,7 @@ import { createHash } from "node:crypto";
 import { getVaultRoot } from "./vault.mjs";
 import { getProvider } from "./vault-storage.mjs";
 import { isArchiveEligible } from "./working-memory.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
 // Resolved through getVaultRoot(), never hardcoded to Neural_Vault/: vault.mjs
 // supports relocating the Vault (setLocalPath moves it, and cloud mode points
@@ -71,7 +72,7 @@ const CAPTURE_SAMPLE = 50;
  */
 function scanCachePath() {
   const id = createHash("sha1").update(getVaultRoot()).digest("hex").slice(0, 12);
-  return path.join(os.homedir(), ".psyntient", `vault-scan-${id}.json`);
+  return path.join(psyntientHome(), `vault-scan-${id}.json`);
 }
 
 function readScanCache() {

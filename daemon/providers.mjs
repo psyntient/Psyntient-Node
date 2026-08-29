@@ -15,8 +15,9 @@ import path from "node:path";
 import os from "node:os";
 import { runCli, jsonCommand } from "./openclaw-cli.mjs";
 import { restart } from "./openclaw-control.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
-const PROVIDERS_PATH = path.join(os.homedir(), ".psyntient", "providers.json");
+const PROVIDERS_PATH = path.join(psyntientHome(), "providers.json");
 
 // Curated from Cortex/Open-Claw/extensions/ — real registered provider
 // plugin ids that take a pasted API key (excludes e.g. ollama, which is

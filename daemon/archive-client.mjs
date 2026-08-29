@@ -19,8 +19,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { psyntientHome } from "./psyntient-home.mjs";
 
-const NODE_KEY_PATH = path.join(os.homedir(), ".psyntient", "node.key");
+const NODE_KEY_PATH = path.join(psyntientHome(), "node.key");
 const DEFAULT_BASE_URL = "https://archive.psyntient.io";
 const TIMEOUT_MS = 30_000;
 

@@ -9,9 +9,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { paths as openclawPaths } from "./openclaw-cli.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
 const LOOP_SCRIPT = path.join(openclawPaths.NODE_ROOT, "daemon", "heartbeat-loop.mjs");
-const PID_FILE = path.join(os.homedir(), ".psyntient", "heartbeat.pid");
+const PID_FILE = path.join(psyntientHome(), "heartbeat.pid");
 const LOG_FILE = path.join(openclawPaths.NODE_ROOT, "logs", "heartbeat.log");
 
 function readPid() {

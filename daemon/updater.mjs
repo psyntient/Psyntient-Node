@@ -25,6 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { paths as openclawPaths } from "./openclaw-cli.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
 const run = promisify(execFile);
 
@@ -33,7 +34,7 @@ const OPENCLAW_DIR = path.join(NODE_ROOT, "Cortex", "Open-Claw");
 const BUNDLE = path.join(NODE_ROOT, "Cortex", "openclaw-fork", "psyntient-fork.bundle");
 const DIST = path.join(OPENCLAW_DIR, "dist");
 const DIST_PREV = path.join(OPENCLAW_DIR, "dist.prev");
-const STATE_DIR = path.join(os.homedir(), ".psyntient");
+const STATE_DIR = psyntientHome();
 const STATE_FILE = path.join(STATE_DIR, "update-state.json");
 const LOCK_FILE = path.join(STATE_DIR, "update.lock");
 const GATEWAY_URL = process.env.PSYNTIENT_GATEWAY_URL || "http://127.0.0.1:18789";
@@ -333,7 +334,7 @@ async function restoreDist() {
 async function gatewayCli(args) {
   const env = {
     ...process.env,
-    OPENCLAW_STATE_DIR: path.join(os.homedir(), ".psyntient", "openclaw-state"),
+    OPENCLAW_STATE_DIR: path.join(psyntientHome(), "openclaw-state"),
   };
   env.OPENCLAW_CONFIG_PATH = path.join(env.OPENCLAW_STATE_DIR, "openclaw.json");
   return run("node", [path.join(OPENCLAW_DIR, "openclaw.mjs"), ...args], {

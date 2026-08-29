@@ -11,9 +11,10 @@ import path from "node:path";
 import os from "node:os";
 import { paths as openclawPaths } from "./openclaw-cli.mjs";
 import { paths as voicePaths } from "./voice-transcription.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
 const SCRIPT_PATH = path.join(openclawPaths.NODE_ROOT, "daemon", "voice-transcription.mjs");
-const PID_FILE = path.join(os.homedir(), ".psyntient", "voice-transcription.pid");
+const PID_FILE = path.join(psyntientHome(), "voice-transcription.pid");
 const LOG_FILE = path.join(openclawPaths.NODE_ROOT, "logs", "voice-transcription.log");
 const PORT = voicePaths.PORT;
 

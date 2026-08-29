@@ -5,13 +5,50 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 import os from "node:os";
 
 const NODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OPEN_CLAW_DIR = path.join(NODE_ROOT, "Cortex", "Open-Claw");
-const STATE_DIR = path.join(os.homedir(), ".psyntient", "openclaw-state");
-const CONFIG_PATH = path.join(STATE_DIR, "openclaw.json");
-const GATEWAY_PORT = 18789;
+// WHY THESE ARE OVERRIDABLE
+//
+// They were hardcoded to the default location, and runCli additionally FORCED
+// them into every child's environment -- so a Node installed anywhere else, or
+// a second Node on the same machine, silently operated on the default Node's
+// state instead of its own. Not a theoretical concern: the installer's
+// sandbox mode exists to isolate a test install, and this defeated it
+// completely. A sandboxed install stored its provider key in the real Node's
+// auth store and restarted the real Node's gateway, with no error and nothing
+// on screen suggesting the wrong Node had been touched.
+//
+// Unset, every value is the product default, so an ordinary single-Node
+// install behaves exactly as before.
+const STATE_DIR =
+  (process.env.OPENCLAW_STATE_DIR || "").trim() ||
+  path.join(os.homedir(), ".psyntient", "openclaw-state");
+const CONFIG_PATH =
+  (process.env.OPENCLAW_CONFIG_PATH || "").trim() || path.join(STATE_DIR, "openclaw.json");
+// The port belongs to the config, not to this module. Read it when it is
+// there: a Node on a non-default port was otherwise health-checked, restarted
+// and linked against 18789 -- another Node's port, or nothing at all.
+const GATEWAY_PORT = readConfiguredPort(CONFIG_PATH);
+
+function readConfiguredPort(configPath) {
+  const fromEnv = Number((process.env.OPENCLAW_GATEWAY_PORT || "").trim());
+  if (Number.isInteger(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  try {
+    const port = JSON.parse(fs.readFileSync(configPath, "utf8"))?.gateway?.port;
+    if (Number.isInteger(port) && port > 0) {
+      return port;
+    }
+  } catch {
+    // No config yet (a first run, before configure) or unreadable: the product
+    // default is the right answer, and it is what the installer writes.
+  }
+  return 18789;
+}
 
 export function runCli(args, { timeoutMs = 20000, input } = {}) {
   return new Promise((resolve, reject) => {

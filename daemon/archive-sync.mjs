@@ -22,9 +22,10 @@ import os from "node:os";
 import path from "node:path";
 import { archiveBaseUrl, ArchiveError } from "./archive-client.mjs";
 import { isArchiveEligible } from "./working-memory.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
-const NODE_KEY_PATH = path.join(os.homedir(), ".psyntient", "node.key");
-const SETTINGS_PATH = path.join(os.homedir(), ".psyntient", "sync.json");
+const NODE_KEY_PATH = path.join(psyntientHome(), "node.key");
+const SETTINGS_PATH = path.join(psyntientHome(), "sync.json");
 const TIMEOUT_MS = 60_000;
 
 /** Required keys that identify a file as an Observation Packet. */

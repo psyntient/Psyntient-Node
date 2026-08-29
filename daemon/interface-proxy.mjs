@@ -26,12 +26,13 @@ import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { psyntientHome } from "./psyntient-home.mjs";
 
 const LISTEN_HOST = "127.0.0.1";
 const LISTEN_PORT = Number(process.env.NOETIC_PROXY_PORT ?? 3210);
 const UPSTREAM_HOST = "127.0.0.1";
 const UPSTREAM_PORT = Number(process.env.NOETIC_UPSTREAM_PORT ?? 18789);
-const PID_PATH = path.join(os.homedir(), ".psyntient", "interface-proxy.pid");
+const PID_PATH = path.join(psyntientHome(), "interface-proxy.pid");
 
 function upstreamDownPage(detail) {
   return `<!doctype html><meta charset="utf-8"><title>Psyntient — starting</title>
