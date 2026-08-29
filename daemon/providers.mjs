@@ -109,8 +109,30 @@ const OPENROUTER_CHAT_DEFAULT = "openrouter/google/gemini-3.7-flash";
 // own implementation that plain `config get`/`config set` calls -- normally
 // fast -- occasionally ran past 20s under real network conditions (unrelated
 // npm/registry traffic contending for the same sqlite-backed config store).
+/** True when `config get` reported the path simply does not exist yet. */
+function isConfigPathMissing(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof value.error === "string" &&
+    /not found/i.test(value.error)
+  );
+}
+
 export async function applyOpenRouterChatDefault() {
-  const current = await jsonCommand(["config", "get", "agents.defaults.model.primary"], { timeoutMs: 30000 });
+  const raw = await jsonCommand(["config", "get", "agents.defaults.model.primary"], { timeoutMs: 30000 });
+  // On a Node that has never had this key set -- which is EVERY fresh install
+  // -- the CLI does not return undefined. It returns
+  // {"error":"Config path not found: agents.defaults.model.primary"}, an
+  // object, which is not in the stock set, so the guard below read it as "the
+  // user chose something deliberate" and declined to set anything.
+  //
+  // The result was that no fresh install ever got a model: OpenClaw fell back
+  // to its own built-in default, the interface showed gpt-5.6-sol, and the
+  // agent failed on a Codex backend nobody asked for. The comment this
+  // replaces said the shape had been "verified live" -- it had, but only
+  // against a config where the path already existed.
+  const current = isConfigPathMissing(raw) ? undefined : raw;
   if (!OPENROUTER_STOCK_DEFAULTS.has(current)) return { changed: false };
   const result = await runCli(["config", "set", "agents.defaults.model.primary", OPENROUTER_CHAT_DEFAULT], { timeoutMs: 30000 });
   if (result.code !== 0) {
