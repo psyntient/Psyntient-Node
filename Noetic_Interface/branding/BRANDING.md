@@ -217,12 +217,46 @@ Skeletons: `bg-muted` shimmer sweeping gold at 8% opacity, 1.6s.
 
 ## 6. Logo & marks
 
+**Current mark: `psyntient-mark-2026.png` (adopted 2026-08-29).** A brain
+silhouette in a full-spectrum gradient with white circuit nodes, on
+transparency. It supersedes the earlier gold-only mark in app chrome, the
+installer, and the setup wizard.
+
+Its palette, sampled from the artwork itself rather than eyeballed:
+
+| Stop | Hex |
+|---|---|
+| crimson | `#DF0B56` |
+| pink | `#E04980` |
+| purple | `#8C3ADF` |
+| blue | `#0E4BFE` |
+| cyan | `#09BDE6` |
+| green | `#4DD664` |
+| amber | `#FAB220` |
+
+Shipped as the `--psy-spectrum` CSS token (Control UI `base.css`, and the
+installer's own stylesheet). **Sample from the file, never re-pick by eye** —
+the wordmark and the mark must not drift apart.
+
+The wordmark "Psyntient" is set in the display serif with that spectrum applied
+via `background-clip: text`, left to right. Always pair it with a
+`@supports not` fallback to the foreground colour: without background-clip
+support, transparent text renders invisible rather than degrading.
+
+**This does not replace Ink & Gold.** Gold remains the accent for controls,
+focus rings and primary actions. The spectrum is the *logo*, plus interactions
+that should read as the brand moving — the installer's primary-button hover
+flows it left to right. Do not turn it into a general-purpose accent.
+
+The flower of life stays as the spinner/loader and background motif.
+
 Files in `./assets/`:
 
 | File | What | Use |
 |---|---|---|
-| `psyntient-mark.png` | Symbol only, transparent | App icon, titlebar, favicon, nav |
-| `psyntient-logo.png` | Full lockup (mark + PSYNTIENT wordmark) | Splash, installer, about box |
+| `psyntient-mark-2026.png` | **Current** brain mark, transparent | App chrome, titlebar, favicon, installer, setup wizard |
+| `psyntient-mark.png` | Superseded gold mark | Historical; do not use in new surfaces |
+| `psyntient-logo.png` | Full lockup (mark + PSYNTIENT wordmark) | Splash, about box |
 
 Rules:
 
