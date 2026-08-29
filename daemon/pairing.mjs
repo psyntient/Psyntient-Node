@@ -24,13 +24,14 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { psyntientHome } from "./psyntient-home.mjs";
 import path from "node:path";
 import os from "node:os";
 import { openInBrowser } from "./open-browser.mjs";
 import { paths as gatewayPaths } from "./openclaw-control.mjs";
 import { deviceName } from "./device-name.mjs";
 
-const PSYNTIENT_DIR = path.join(os.homedir(), ".psyntient");
+const PSYNTIENT_DIR = psyntientHome();
 const NODE_KEY_PATH = path.join(PSYNTIENT_DIR, "node.key");
 const BASE_URL = (process.env.PSYNTIENT_BASE_URL || "https://psyntient.io").trim();
 const CALLBACK_PORT = 47123;

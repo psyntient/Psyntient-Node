@@ -11,11 +11,21 @@
 //   so a marker file is the right tool, unlike the other two.
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { hasAnyProvider } from "./providers.mjs";
 import { isPaired } from "./pairing.mjs";
+import { psyntientHome } from "./psyntient-home.mjs";
 
-const MARKER_PATH = path.join(os.homedir(), ".psyntient", "onboarding-complete");
+const MARKER_PATH = path.join(psyntientHome(), "onboarding-complete");
+
+/**
+ * Written by the installer when it hands off to the app.
+ *
+ * It exists so setup can present itself as the CONTINUATION of the install
+ * rather than a second wizard that starts over at step one. A user who has just
+ * watched an eight-minute install does not want to be welcomed again and told
+ * they are at the beginning.
+ */
+const INSTALLED_VIA_WIZARD = path.join(psyntientHome(), "installed-via-wizard");
 
 function hasCompletedMarker() {
   return fs.existsSync(MARKER_PATH);
@@ -29,10 +39,15 @@ export function markCompleted() {
 
 export async function getStatus() {
   const [hasProvider, paired] = await Promise.all([hasAnyProvider(), Promise.resolve(isPaired())]);
-  return { hasProvider, isPaired: paired, completed: hasCompletedMarker() };
+  return {
+    hasProvider,
+    isPaired: paired,
+    completed: hasCompletedMarker(),
+    viaInstaller: fs.existsSync(INSTALLED_VIA_WIZARD),
+  };
 }
 
-export const paths = { MARKER_PATH };
+export const paths = { MARKER_PATH, INSTALLED_VIA_WIZARD };
 
 // CLI fallback, same pattern as vault.mjs/working-memory.mjs.
 if (import.meta.url === `file://${process.argv[1]}`) {
