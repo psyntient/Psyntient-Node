@@ -268,13 +268,19 @@ async function gatewayCli(args) {
 }
 
 /** Up means: serving HTTP and answering as the gateway, not merely a live port. */
-async function healthy({ tries = 12, delayMs = 2000 } = {}) {
+async function healthy({ tries = 15, delayMs = 2000, streak = 2 } = {}) {
+  // Consecutive successes, not one. A restarting LaunchAgent answers during
+  // the changeover and then goes away again -- observed exactly that: a health
+  // check passed, and the gateway was down seconds later. One 200 proves a
+  // socket answered, not that the service settled.
+  let run = 0;
   for (let i = 0; i < tries; i++) {
     try {
       const res = await fetch(`${GATEWAY_URL}/health`, { signal: AbortSignal.timeout(4000) });
-      if (res.ok) return true;
+      run = res.ok ? run + 1 : 0;
+      if (run >= streak) return true;
     } catch {
-      // Not up yet.
+      run = 0;
     }
     await new Promise((r) => setTimeout(r, delayMs));
   }
@@ -331,23 +337,49 @@ export async function apply({ onProgress, force = false } = {}) {
 
     if (status.files.some((f) => f.endsWith(".bundle")) && OPENCLAW_SOURCE.kind === "bundle") {
       say("fork", "restoring the OpenClaw fork", 25);
-      await git(OPENCLAW_DIR, ["fetch", OPENCLAW_SOURCE.path, "psyntient:psyntient"]);
-      await git(OPENCLAW_DIR, ["checkout", "psyntient"]);
+      const branch = await git(OPENCLAW_DIR, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      if (branch !== "psyntient") {
+        throw new Error(
+          `Open-Claw is on "${branch}", not the psyntient fork branch; refusing to update it.`,
+        );
+      }
+      // No destination refspec. RESTORE.md fetches `psyntient:psyntient`, which
+      // works from a fresh clone but git REFUSES on a live Node -- you cannot
+      // fetch into the branch that is checked out. Fetch to FETCH_HEAD and
+      // fast-forward the working branch instead.
+      await git(OPENCLAW_DIR, ["fetch", OPENCLAW_SOURCE.path, "psyntient"]);
       await git(OPENCLAW_DIR, ["merge", "--ff-only", "FETCH_HEAD"]);
     }
 
     if (plan.buildOpenclaw) {
-      say(
-        "building",
-        plan.buildOpenclaw === "full"
-          ? "full build — this takes about 20 minutes"
-          : "gateway build",
-        35,
-      );
-      await run("node", [path.join(OPENCLAW_DIR, "scripts", "build-all.mjs"), plan.buildOpenclaw], {
-        cwd: OPENCLAW_DIR,
-        maxBuffer: 64 * 1024 * 1024,
-      });
+      const full = plan.buildOpenclaw === "full";
+      // A `full` build is ~20 minutes of silence. Without a ticking elapsed
+      // time the bar sits at one number long enough to read as a hang, and a
+      // user kills an update that was working -- which is how a Node ends up
+      // half-updated.
+      const startedAt = Date.now();
+      const expected = full ? 20 * 60 * 1000 : 30 * 1000;
+      const tick = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        const mins = Math.floor(elapsed / 60000);
+        const secs = Math.floor((elapsed % 60000) / 1000);
+        say(
+          "building",
+          `${full ? "full build" : "gateway build"} — ${mins}m ${String(secs).padStart(2, "0")}s elapsed`,
+          // Eased toward the end of this stage's range, never reaching it, so
+          // motion continues even though the build cannot report from inside.
+          35 + Math.min(0.95, elapsed / expected) * 30,
+        );
+      }, 1000);
+      try {
+        await run(
+          "node",
+          [path.join(OPENCLAW_DIR, "scripts", "build-all.mjs"), plan.buildOpenclaw],
+          { cwd: OPENCLAW_DIR, maxBuffer: 64 * 1024 * 1024 },
+        );
+      } finally {
+        clearInterval(tick);
+      }
     }
 
     if (plan.buildUi) {
