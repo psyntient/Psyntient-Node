@@ -171,12 +171,23 @@ async function main() {
   // Workspace packages carry their OWN build output, separate from the
   // top-level dist/. Omitting it produced an artifact that installed cleanly
   // and then failed on @openclaw/ai/dist/internal/runtime.mjs.
+  //
+  // package.json ships with it, and that is not optional: imports of these
+  // packages use subpaths (`@openclaw/ai/internal/runtime`) that only resolve
+  // through the exports map, which lives in package.json. Shipping dist alone
+  // fails with "Cannot find module .../@openclaw/ai/internal/runtime" -- and
+  // it fails ONLY in a clean extraction, because any tree that still has the
+  // engine source resolves it from there and hides the omission.
   const packagesDir = path.join(engineDir, "packages");
   if (fs.existsSync(packagesDir)) {
     for (const name of fs.readdirSync(packagesDir)) {
       const from = path.join(packagesDir, name, "dist");
       if (!fs.existsSync(from)) continue;
-      fs.cpSync(from, path.join(outDir, "packages", name, "dist"), { recursive: true });
+      const to = path.join(outDir, "packages", name);
+      fs.mkdirSync(to, { recursive: true });
+      fs.cpSync(from, path.join(to, "dist"), { recursive: true });
+      const manifest = path.join(packagesDir, name, "package.json");
+      if (fs.existsSync(manifest)) fs.cpSync(manifest, path.join(to, "package.json"));
     }
   }
 
