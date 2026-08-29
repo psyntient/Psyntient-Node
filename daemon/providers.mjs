@@ -109,6 +109,13 @@ const OPENROUTER_CHAT_DEFAULT = "openrouter/google/gemini-3.7-flash";
 // own implementation that plain `config get`/`config set` calls -- normally
 // fast -- occasionally ran past 20s under real network conditions (unrelated
 // npm/registry traffic contending for the same sqlite-backed config store).
+//
+// Raised again to 90s, matching the paste-api-key call: 30s FAILED A REAL
+// INSTALL -- "config set agents.defaults.model.primary ... timed out after
+// 30000ms" -- on a gateway that had just been restarted by the key write
+// immediately before it. Three raises say the estimate was never the problem.
+// A timeout here does not cost a retry, it fails the install at the
+// second-to-last phase, and waiting longer than necessary costs nothing.
 /** True when `config get` reported the path simply does not exist yet. */
 function isConfigPathMissing(value) {
   return (
@@ -120,7 +127,7 @@ function isConfigPathMissing(value) {
 }
 
 export async function applyOpenRouterChatDefault() {
-  const raw = await jsonCommand(["config", "get", "agents.defaults.model.primary"], { timeoutMs: 30000 });
+  const raw = await jsonCommand(["config", "get", "agents.defaults.model.primary"], { timeoutMs: 90000 });
   // On a Node that has never had this key set -- which is EVERY fresh install
   // -- the CLI does not return undefined. It returns
   // {"error":"Config path not found: agents.defaults.model.primary"}, an
@@ -134,7 +141,10 @@ export async function applyOpenRouterChatDefault() {
   // against a config where the path already existed.
   const current = isConfigPathMissing(raw) ? undefined : raw;
   if (!OPENROUTER_STOCK_DEFAULTS.has(current)) return { changed: false };
-  const result = await runCli(["config", "set", "agents.defaults.model.primary", OPENROUTER_CHAT_DEFAULT], { timeoutMs: 30000 });
+  const result = await runCli(
+    ["config", "set", "agents.defaults.model.primary", OPENROUTER_CHAT_DEFAULT],
+    { timeoutMs: 90000 },
+  );
   if (result.code !== 0) {
     throw new Error(`Failed to set OpenRouter chat default: ${result.stderr || result.stdout}`);
   }
