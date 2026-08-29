@@ -530,6 +530,72 @@ export default definePluginEntry({
       }),
     });
 
+    // --- Self-update --------------------------------------------------------
+    // GET                    -> what an update would do (and the auto toggle)
+    // POST {action:"apply"}  -> Server-Sent Events: progress, then a result
+    // POST {action:"auto", enabled}
+    //
+    // Apply is streamed for the same reason the Archive search is: a `full`
+    // build takes about twenty minutes, and a request held open that long with
+    // nothing on the wire is indistinguishable from a hang.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/update",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const updater = await daemonModule("updater.mjs");
+
+        if (req.method === "GET") {
+          try {
+            const status = await updater.check();
+            return sendJson(res, 200, { ...status, state: updater.readState() });
+          } catch (err) {
+            // No network, no remote, a detached HEAD -- all normal local
+            // states for an app that may be offline, not server faults.
+            return sendJson(res, 200, {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        if (req.method !== "POST") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+
+        const body = await readJsonBody(req);
+        if (body.action === "auto") {
+          return sendJson(res, 200, { ok: true, ...updater.setAutoUpdate(body.enabled === true) });
+        }
+        if (body.action !== "apply") {
+          return sendJson(res, 400, { ok: false, error: "unknown action" });
+        }
+
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        const send = (event, data) => {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 5_000);
+
+        try {
+          const result = await updater.apply({
+            force: body.force === true,
+            onProgress: (stage) => send("stage", stage),
+          });
+          send("result", result);
+        } catch (err) {
+          send("result", { ok: false, error: err instanceof Error ? err.message : String(err) });
+        } finally {
+          clearInterval(keepAlive);
+          res.end();
+        }
+      }),
+    });
+
     // --- Archive semantic search ------------------------------------------
     // GET ?query=<text>  -> Server-Sent Events: stage updates, then a result.
     //
