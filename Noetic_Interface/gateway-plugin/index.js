@@ -544,18 +544,12 @@ export default definePluginEntry({
       handler: route(async (req, res) => {
         const updater = await daemonModule("updater.mjs");
 
+        // GET is deliberately CHEAP and LOCAL: it reports the recorded state
+        // and never touches the network. Checking for updates is a thing the
+        // user asks for -- either by pressing the button, or by turning auto
+        // on -- not something that happens because a page rendered.
         if (req.method === "GET") {
-          try {
-            const status = await updater.check();
-            return sendJson(res, 200, { ...status, state: updater.readState() });
-          } catch (err) {
-            // No network, no remote, a detached HEAD -- all normal local
-            // states for an app that may be offline, not server faults.
-            return sendJson(res, 200, {
-              ok: false,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+          return sendJson(res, 200, { ok: true, state: updater.readState() });
         }
 
         if (req.method !== "POST") {
@@ -565,6 +559,20 @@ export default definePluginEntry({
         const body = await readJsonBody(req);
         if (body.action === "auto") {
           return sendJson(res, 200, { ok: true, ...updater.setAutoUpdate(body.enabled === true) });
+        }
+        if (body.action === "check") {
+          try {
+            const status = await updater.check();
+            return sendJson(res, 200, { ...status, state: updater.readState() });
+          } catch (err) {
+            // Offline, no remote, a detached HEAD: all normal local states for
+            // an app that may have no network, not server faults.
+            return sendJson(res, 200, {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              state: updater.readState(),
+            });
+          }
         }
         if (body.action !== "apply") {
           return sendJson(res, 400, { ok: false, error: "unknown action" });
