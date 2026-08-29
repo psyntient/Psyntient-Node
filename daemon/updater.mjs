@@ -157,6 +157,58 @@ async function isDirty(cwd) {
   return (await git(cwd, ["status", "--porcelain"])).length > 0;
 }
 
+
+/**
+ * What the INCOMING bundle carries, without pulling it.
+ *
+ * The obvious version of this reads the bundle on disk, and it is wrong: the
+ * bundle is a tracked file in this repo, so the local copy is always the OLD
+ * one until the pull happens. Reading it means fork changes are invisible at
+ * check time -- and since the plan drives the build, every fork update would
+ * quietly under-build, which is the exact failure CLAUDE.md warns about
+ * (a fresh gateway on a stale runtime, surfacing as tool calls dying with no
+ * mention of the build).
+ *
+ * So extract the incoming blob straight out of git into a temp file and ask
+ * that one. Nothing in the working tree is touched.
+ */
+async function inspectIncomingBundle(remoteSha) {
+  const tmp = path.join(os.tmpdir(), `psyntient-incoming-${process.pid}.bundle`);
+  try {
+    const { stdout } = await run(
+      "git",
+      ["-C", NODE_ROOT, "show", `${remoteSha}:Cortex/openclaw-fork/psyntient-fork.bundle`],
+      { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 },
+    );
+    await fs.promises.writeFile(tmp, stdout);
+
+    const head = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
+    const listed = await git(OPENCLAW_DIR, ["bundle", "list-heads", tmp]);
+    const tip = listed.split(/\s+/)[0];
+    if (!tip || tip === head) return { files: [], commits: [] };
+
+    // The tip may be a commit this checkout has never seen, in which case it
+    // cannot be diffed until the bundle is fetched. Assume the expensive plan
+    // rather than under-building.
+    try {
+      return {
+        files: (await git(OPENCLAW_DIR, ["diff", "--name-only", `${head}..${tip}`]))
+          .split("\n")
+          .filter(Boolean),
+        commits: (await git(OPENCLAW_DIR, ["log", "--oneline", `${head}..${tip}`]))
+          .split("\n")
+          .filter(Boolean),
+      };
+    } catch {
+      return { files: ["src/unknown-fork-change"], commits: [] };
+    }
+  } catch {
+    return { files: ["src/unknown-fork-change"], commits: [] };
+  } finally {
+    await fs.promises.rm(tmp, { force: true });
+  }
+}
+
 /**
  * What an update would do, without doing any of it.
  *
@@ -190,24 +242,7 @@ export async function check() {
   let openclawFiles = [];
   let openclawCommits = [];
   if (nodeFiles.some((f) => f.endsWith(".bundle"))) {
-    try {
-      const head = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
-      const listed = await git(OPENCLAW_DIR, ["bundle", "list-heads", BUNDLE]);
-      const tip = listed.split(/\s+/)[0];
-      if (tip && tip !== head) {
-        openclawFiles = (await git(OPENCLAW_DIR, ["diff", "--name-only", `${head}..${tip}`]))
-          .split("\n")
-          .filter(Boolean);
-        openclawCommits = (await git(OPENCLAW_DIR, ["log", "--oneline", `${head}..${tip}`]))
-          .split("\n")
-          .filter(Boolean);
-      }
-    } catch {
-      // The incoming bundle may carry commits this checkout has never seen, so
-      // it cannot always be diffed before fetching. Assume the expensive plan
-      // rather than under-building.
-      openclawFiles = ["src/unknown"];
-    }
+    ({ files: openclawFiles, commits: openclawCommits } = await inspectIncomingBundle(remote));
   }
 
   const plan = classify([...nodeFiles, ...openclawFiles]);
@@ -325,7 +360,7 @@ export async function apply({ onProgress, force = false } = {}) {
     }
 
     preSha = status.current;
-    const plan = status.plan;
+    const plan = { ...status.plan };
 
     say("snapshot", "saving the current build", 8);
     snapped = await snapshotDist();
@@ -347,8 +382,27 @@ export async function apply({ onProgress, force = false } = {}) {
       // works from a fresh clone but git REFUSES on a live Node -- you cannot
       // fetch into the branch that is checked out. Fetch to FETCH_HEAD and
       // fast-forward the working branch instead.
+      const beforeFork = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
       await git(OPENCLAW_DIR, ["fetch", OPENCLAW_SOURCE.path, "psyntient"]);
       await git(OPENCLAW_DIR, ["merge", "--ff-only", "FETCH_HEAD"]);
+      const afterFork = await git(OPENCLAW_DIR, ["rev-parse", "HEAD"]);
+
+      // Re-derive from what actually landed. The pre-pull plan is a preview
+      // built from an inspected copy of the bundle; this is ground truth, and
+      // the build decision should never rest on the preview when the real
+      // answer is now available for free.
+      if (afterFork !== beforeFork) {
+        const forkFiles = (
+          await git(OPENCLAW_DIR, ["diff", "--name-only", `${beforeFork}..${afterFork}`])
+        )
+          .split("\n")
+          .filter(Boolean);
+        const merged = classify([...status.files, ...forkFiles]);
+        plan.buildOpenclaw = merged.buildOpenclaw;
+        plan.buildUi = plan.buildUi || merged.buildUi;
+        plan.restart = plan.restart || merged.restart;
+        plan.reasons = merged.reasons;
+      }
     }
 
     if (plan.buildOpenclaw) {
