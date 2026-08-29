@@ -8,11 +8,18 @@
 // then died on `fast-deep-equal`, required by `ajv` from inside a CJS file.
 // Scanning the bundle for `import()` sites has the identical blind spot.
 //
-// So the artifact is defined by what actually boots: start with nothing, add
-// only what the gateway fails on, repeat until it serves. That is slower than
-// reading a list and it is the only method that converges. A checked-in list
-// would also rot silently on the next engine update, in exactly the way that
-// produces an artifact which installs cleanly and breaks on first use.
+// So the artifact is defined by what actually RUNS: start with nothing, add
+// only what a real invocation fails on, repeat. That is slower than reading a
+// list and it is the only method that converges. A checked-in list would also
+// rot silently on the next engine update, in exactly the way that produces an
+// artifact which installs cleanly and breaks on first use.
+//
+// "What runs" means every path the installer and updater reach, not just the
+// gateway. Deriving from `gateway run` alone missed `models auth
+// paste-api-key`, `config get` and `gateway install` -- all of which the
+// installer executes AFTER the artifact has landed, and any of which could
+// need a package the boot never touched. That failure would arrive at the
+// second-to-last install phase, on the user's machine, after the download.
 //
 // Usage: node scripts/build-engine-artifact.mjs <engine-dir> <out-dir>
 import { spawn } from "node:child_process";
@@ -53,31 +60,25 @@ function packageOf(spec) {
   return s.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
 }
 
-async function bootOnce(stateDir) {
+/** Runs the gateway until it serves, or until it names a missing module. */
+async function probeGateway(stateDir) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["openclaw.mjs", "gateway", "run"], {
       cwd: engineDir,
-      env: {
-        ...process.env,
-        OPENCLAW_STATE_DIR: stateDir,
-        OPENCLAW_CONFIG_PATH: path.join(stateDir, "openclaw.json"),
-        PSYNTIENT_HOME: path.join(stateDir, "home"),
-      },
+      env: childEnv(stateDir),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
-
-    const done = (result) => {
+    const done = (r) => {
       try {
         child.kill("SIGKILL");
       } catch {}
-      resolve(result);
+      resolve(r);
     };
-
-    // Poll rather than wait for a ready line: the gateway prints several
-    // things that look like readiness and only one that is.
+    // Poll rather than wait for a ready line: the gateway prints several things
+    // that look like readiness and only one that is.
     let waited = 0;
     const tick = setInterval(async () => {
       waited += 1000;
@@ -87,7 +88,7 @@ async function bootOnce(stateDir) {
         });
         if (res.ok) {
           clearInterval(tick);
-          done({ healthy: true, out });
+          done({ ok: true, out });
           return;
         }
       } catch {
@@ -96,11 +97,78 @@ async function bootOnce(stateDir) {
       const miss = out.match(/Cannot find (?:module|package) '([^']+)'/);
       if (miss || waited > 90_000) {
         clearInterval(tick);
-        done({ healthy: false, missing: miss?.[1], out });
+        done({ ok: false, missing: miss?.[1], out });
       }
     }, 1000);
   });
 }
+
+/** Runs a short-lived CLI command to completion. */
+async function probeCommand(stateDir, argv, input) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["openclaw.mjs", ...argv], {
+      cwd: engineDir,
+      env: childEnv(stateDir),
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    if (input !== undefined) {
+      child.stdin.end(input);
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+    }, 120_000);
+    child.on("close", () => {
+      clearTimeout(timer);
+      const miss = out.match(/Cannot find (?:module|package) '([^']+)'/);
+      // A non-zero exit is FINE. These commands are expected to fail -- there
+      // is no configured provider, no service to install in a container. Only
+      // a missing module means the artifact is incomplete.
+      resolve({ ok: !miss, missing: miss?.[1], out });
+    });
+  });
+}
+
+function childEnv(stateDir) {
+  return {
+    ...process.env,
+    OPENCLAW_STATE_DIR: stateDir,
+    OPENCLAW_CONFIG_PATH: path.join(stateDir, "openclaw.json"),
+    PSYNTIENT_HOME: path.join(stateDir, "home"),
+  };
+}
+
+/**
+ * Every code path the installer and updater actually reach.
+ *
+ * Deriving from `gateway run` alone was not enough, and the gap was real: after
+ * the artifact lands, the installer still runs `gateway install`, `gateway
+ * start`, and daemon/providers.mjs -- which shells out to `models auth
+ * paste-api-key` and `config get`. Those are different code paths, and a
+ * package only they reach would be missing from the artifact and would fail
+ * AFTER the download, on the user's machine, at the second-to-last phase.
+ *
+ * The key here is deliberately fake. It exercises the write path far enough to
+ * load its dependencies; the call fails on authentication, which is expected
+ * and ignored.
+ */
+const PROBES = [
+  { name: "gateway boot", gateway: true },
+  { name: "models auth list", argv: ["models", "auth", "list"] },
+  { name: "models list", argv: ["models", "list"] },
+  { name: "config get", argv: ["config", "get", "agents.defaults.model.primary"] },
+  {
+    name: "paste-api-key",
+    argv: ["models", "auth", "paste-api-key", "--provider", "openrouter", "--profile-id", "derive:probe"],
+    input: "sk-or-v1-artifact-derivation-probe-not-a-real-key\n",
+  },
+  { name: "gateway status", argv: ["gateway", "status"] },
+  { name: "doctor", argv: ["doctor"] },
+];
 
 async function main() {
   if (!fs.existsSync(path.join(engineDir, "openclaw.mjs"))) {
@@ -140,24 +208,27 @@ async function main() {
   }
 
   let added = 0;
-  for (let round = 1; round <= MAX_ROUNDS; round += 1) {
-    const result = await bootOnce(stateDir);
-    if (result.healthy) {
-      log(`healthy after ${round} boot(s), ${added} packages`);
-      break;
+  for (const probe of PROBES) {
+    log(`probing: ${probe.name}`);
+    for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+      const result = probe.gateway
+        ? await probeGateway(stateDir)
+        : await probeCommand(stateDir, probe.argv, probe.input);
+      if (result.ok) break;
+      if (!result.missing) {
+        console.error(result.out.slice(-3000));
+        throw new Error(`${probe.name}: unhealthy with no missing-module error`);
+      }
+      const pkg = packageOf(result.missing);
+      if (!copyPackage(pkg)) {
+        throw new Error(`${probe.name}: cannot satisfy ${result.missing} (package ${pkg})`);
+      }
+      added += 1;
+      log(`  + ${pkg}`);
+      if (round === MAX_ROUNDS) throw new Error(`${probe.name} did not converge`);
     }
-    if (!result.missing) {
-      console.error(result.out.slice(-3000));
-      throw new Error(`round ${round}: unhealthy with no missing-module error`);
-    }
-    const pkg = packageOf(result.missing);
-    if (!copyPackage(pkg)) {
-      throw new Error(`round ${round}: cannot satisfy ${result.missing} (package ${pkg})`);
-    }
-    added += 1;
-    log(`+ ${pkg}`);
-    if (round === MAX_ROUNDS) throw new Error("did not converge");
   }
+  log(`all probes satisfied, ${added} packages`);
 
   log("assembling");
   fs.rmSync(outDir, { recursive: true, force: true });
