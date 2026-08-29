@@ -1,0 +1,139 @@
+# Builds the prebuilt engine artifact a Node installs instead of compiling.
+#
+# WHY THIS RUNS HERE AND NOT IN THE ENGINE FORK
+# Rule 2: code that must survive an OpenClaw update lives outside
+# Cortex/Open-Claw. The fork is checked out as a step instead, so an upstream
+# merge never touches this workflow or the script it runs.
+#
+# WHY ONE JOB AND NOT A PLATFORM MATRIX
+# The artifact is platform-neutral. dist/ is bundled JavaScript, and the single
+# package in the runtime set that carries native code
+# (@earendil-works/pi-tui) ships prebuilds for darwin-x64, darwin-arm64,
+# win32-x64 and win32-arm64 together. The only per-platform component is the
+# Node runtime itself, which the installer already downloads from nodejs.org.
+name: Engine artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: Engine ref to build (branch, tag or sha)
+        required: false
+        default: psyntient
+      publish:
+        description: Publish a release rather than only an artifact
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The build peaks near 9 GB and takes ~20 minutes on 4 cores. GitHub's
+    # standard runner has 16 GB, so it fits with room; an 8 GB developer laptop
+    # does not, which is the whole reason this workflow exists.
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out Psyntient Node
+        uses: actions/checkout@v4
+
+      - name: Check out the engine fork
+        uses: actions/checkout@v4
+        with:
+          repository: psyntient/Open-Claw-Forked
+          ref: ${{ inputs.engine_ref || 'psyntient' }}
+          path: engine
+          # Shallow: the artifact is built from a single commit's tree, and the
+          # fork shares 2 GB of upstream history nobody here needs.
+          fetch-depth: 1
+
+      - name: Record what is being built
+        id: meta
+        run: |
+          cd engine
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          # Pinned to the same version the installer downloads
+          # (phases.NodeVersion), so CI builds the artifact on the runtime that
+          # will execute it. The engine's own `engines` field is a range; a
+          # range would let CI drift onto a Node the installer never ships.
+          # There is no .nvmrc in the fork to read.
+          node-version: '24.15.0'
+
+      - name: Install dependencies
+        working-directory: engine
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: engine
+        # `full`, never `gatewayWatch`. The fast profile runs one build step and
+        # leaves a fresh gateway on a stale AI runtime, which surfaces as every
+        # tool call failing with an error that never mentions the build.
+        run: |
+          node scripts/build-all.mjs full
+          node scripts/ui.js build
+
+      - name: Derive and assemble the artifact
+        # The package set is derived by booting, not read from a list: a
+        # resolution hook cannot see CommonJS require(), so any static list is
+        # wrong in a way that only shows up at runtime. See the script header.
+        run: node scripts/build-engine-artifact.mjs engine artifact
+
+      - name: Verify the artifact boots on its own
+        # The assembly step already boots during derivation, but that runs
+        # against the engine tree. This proves a CLEAN extraction serves, which
+        # is what a user actually gets.
+        run: |
+          set -euo pipefail
+          rm -rf verify && mkdir -p verify
+          cp -R engine/openclaw.mjs engine/package.json engine/scripts verify/ 2>/dev/null || true
+          cp -R artifact/dist artifact/node_modules verify/
+          [ -d artifact/packages ] && cp -R artifact/packages verify/packages
+          STATE=$(mktemp -d)
+          cat > "$STATE/openclaw.json" <<JSON
+          {"gateway":{"auth":{"mode":"token","token":"verify-only"},"port":18998,"mode":"local","bind":"loopback"}}
+          JSON
+          cd verify
+          OPENCLAW_STATE_DIR="$STATE" OPENCLAW_CONFIG_PATH="$STATE/openclaw.json" \
+            node openclaw.mjs gateway run > /tmp/verify.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18998/health >/dev/null 2>&1; then
+              echo "artifact serves health"; exit 0
+            fi
+            sleep 2
+          done
+          echo "artifact failed to serve:"; tail -40 /tmp/verify.log; exit 1
+
+      - name: Package
+        run: |
+          tar -czf psyntient-engine-${{ steps.meta.outputs.short }}.tar.gz -C artifact .
+          ls -lh psyntient-engine-*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psyntient-engine-${{ steps.meta.outputs.short }}
+          path: psyntient-engine-*.tar.gz
+          retention-days: 30
+
+      - name: Publish release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Tagged by ENGINE sha, not by this repo's: the artifact is the engine's
+        # build output, and an installer or updater resolving one needs to ask
+        # "which engine commit" rather than "which Node commit".
+        run: |
+          gh release create "engine-${{ steps.meta.outputs.sha }}" \
+            psyntient-engine-${{ steps.meta.outputs.short }}.tar.gz \
+            --title "Engine ${{ steps.meta.outputs.short }}" \
+            --notes "Prebuilt engine artifact for ${{ steps.meta.outputs.sha }}. Install-time replacement for pnpm install + build-all full." \
+            || gh release upload "engine-${{ steps.meta.outputs.sha }}" \
+                 psyntient-engine-${{ steps.meta.outputs.short }}.tar.gz --clobber
