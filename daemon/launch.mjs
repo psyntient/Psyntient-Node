@@ -68,7 +68,23 @@ async function main() {
   ensureWorkingMemoryScaffold();
 
   console.log("Psyntient Node: checking Gateway...");
-  const gatewayStatus = await ensureGatewayRunning();
+  // A cold start installs and starts a LaunchAgent and can take tens of
+  // seconds. Without a heartbeat on stdout that is indistinguishable from a
+  // hung launcher -- which is exactly how this looked before the fast path
+  // below existed: 27 seconds of silence, then a browser.
+  const started = Date.now();
+  const ticker = setInterval(() => {
+    console.log(`  still starting the Gateway... ${Math.round((Date.now() - started) / 1000)}s`);
+  }, 3000);
+  let gatewayStatus;
+  try {
+    gatewayStatus = await ensureGatewayRunning();
+  } finally {
+    clearInterval(ticker);
+  }
+  if (!gatewayStatus.alreadyRunning) {
+    console.log(`Gateway ready in ${Math.round((Date.now() - started) / 1000)}s`);
+  }
 
   // v2 serves the Interface from the Gateway itself: the Control UI fork IS
   // the Noetic Interface, built into dist/control-ui and served on the gateway

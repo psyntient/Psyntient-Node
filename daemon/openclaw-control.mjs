@@ -44,7 +44,37 @@ function sleep(ms) {
 // Idempotent: install if missing, start if not running, wait for health.
 // This is what the GUI launcher and any future daemon entry point should
 // call — never call install/start directly from outside this module.
+/**
+ * Is the gateway already answering HTTP?
+ *
+ * Everything else here goes through the CLI, which starts a process and
+ * reconnects to the gateway over WebSocket for each call. That costs seconds
+ * per round trip, and ensureRunning() makes three of them -- measured at 27s
+ * on a running Node. A launcher that sits silent for 27 seconds is
+ * indistinguishable from a broken one, and "already running" is the common
+ * case on every launch after the first.
+ */
+async function respondsToHttp(timeoutMs = 1500) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${GATEWAY_PORT}/health`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureRunning({ pollMs = 500, timeoutMs = 20000 } = {}) {
+  // Fast path: milliseconds instead of three CLI round trips.
+  if (await respondsToHttp()) {
+    return {
+      ok: true,
+      alreadyRunning: true,
+      interfaceUrl: `http://127.0.0.1:${GATEWAY_PORT}/`,
+    };
+  }
+
   let current = await status();
   if (!current?.service?.loaded) {
     await install({ force: false });
