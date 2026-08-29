@@ -191,6 +191,40 @@ Verify after any upstream update: `openclaw --version`, `openclaw health`,
 `curl -fsS http://127.0.0.1:18789/readyz`, `openclaw gateway status --deep --json`,
 `openclaw doctor --lint --json`, plus the four invariants in rules 2–6 above.
 
+## PWA icons — do not re-declare `maskable`
+
+Settled in v1, re-broken and re-fixed 2026-08-29. Source:
+`Psyntient_Node_PWA_Icons_Guide.md`.
+
+**Declare only the transparent circular `"any"` icons (192 + 512).** Chromium
+desktop prefers a declared `maskable` icon and crops it to a platform tile — a
+rounded square on macOS — which buries the circular mark under the exact
+background v1 spent a cycle removing. Psyntient Node is desktop-first, so that
+trade goes the other way.
+
+The maskable PNGs stay in `ui/public/brand/`, undeclared. Re-add them when
+Android ships: Android is the one platform that genuinely wants them, and
+losing its adaptive shaping is the accepted cost until then.
+
+**The Apple Touch icon must be opaque, 180x180, with the ink background**, and
+belongs to the HTML `<link rel="apple-touch-icon">` — not the manifest icons
+array. iOS does not honour transparency; it composites onto a background, so a
+transparent source produces an unpredictable tile. A transparent 512x512 file
+mislabelled as 180x180 was shipping before this was caught.
+
+Installability needs a **192x192 and a 512x512 PNG with `purpose: "any"`** —
+nothing else in the manifest substitutes. Missing those is why the app could
+not be installed at all.
+
+iOS additionally needs `apple-mobile-web-app-capable` in the HTML head; it
+reads none of the manifest's display settings, so without it an "Add to Home
+Screen" install opens in Safari chrome rather than standalone.
+
+**Swapping icon art:** browsers cache manifest icons aggressively. Change the
+filename (a version suffix) rather than the bytes, or an installed PWA keeps
+the old art. Clearing it otherwise means removing the app from `chrome://apps`,
+clearing site data for the origin, and reinstalling.
+
 ## Safe OpenClaw update procedure
 
 1. Stop the Gateway service.
