@@ -235,8 +235,20 @@ async function git(cwd, args) {
   return stdout.trim();
 }
 
+// Only TRACKED modifications count. The question this answers is "would
+// updating destroy work the user did?", and an untracked file is by
+// definition not something the update is about to overwrite -- if an incoming
+// commit does add that same path, git's own ff-only merge refuses, loudly and
+// without losing anything, which is the correct place for that check.
+//
+// Counting untracked files here was strictly worse than useless: the
+// installer leaves a ~250 MB runtime/ directory in the install root, so every
+// Node ever installed reported itself as having "uncommitted local changes"
+// and refused to update for the rest of its life. The gitignore entries fix
+// that for new installs; this fixes it for the ones already out there, which
+// cannot receive a gitignore they are unable to pull.
 async function isDirty(cwd) {
-  return (await git(cwd, ["status", "--porcelain"])).length > 0;
+  return (await git(cwd, ["status", "--porcelain", "--untracked-files=no"])).length > 0;
 }
 
 

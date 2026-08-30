@@ -48,3 +48,12 @@ Cortex/openclaw-state/
 # is machine-specific.
 Noetic_Interface/gateway-plugin/node_modules/
 Noetic_Interface/gateway-plugin/package-lock.json
+
+# The Node runtime the installer downloads into the install root (~250 MB),
+# and the installer's own resume state. Both are products of installing, not
+# things a user edited -- but `git status --porcelain` counts untracked files,
+# so before this line EVERY fresh install was born dirty and the updater
+# refused to ever run on it. Nothing was wrong with those installs; the
+# updater was reading the installer's own footprints as user changes.
+runtime/
+.psyntient-install-state.json
