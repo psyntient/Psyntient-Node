@@ -17,7 +17,19 @@ export function health(opts = {}) {
 // much longer than a status/health query — observed ~38s for a plain
 // restart — so these get a generous timeout of their own rather than the
 // default meant for quick queries.
-const LIFECYCLE_TIMEOUT_MS = 60000;
+//
+// RAISED 60s -> 180s. The ~38s figure was measured restarting a WARM Node,
+// and the one restart that matters most happens on a cold one: storing the
+// model key during a fresh install restarts a gateway that has never booted.
+// A first boot was measured at 64s idle on an 8 GB Intel machine and over
+// 94s with one other Node running, so the old ceiling sat below the real
+// duration of the case it was guarding, and the install failed at the key
+// step having already downloaded everything.
+//
+// The cost of waiting longer is zero when the restart is quick -- this
+// returns when the command returns. The cost of being too short is a failed
+// install at the last step.
+const LIFECYCLE_TIMEOUT_MS = 180000;
 
 export function install({ force = false } = {}) {
   const args = ["gateway", "install", "--port", String(GATEWAY_PORT)];
