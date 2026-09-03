@@ -127,10 +127,91 @@ function route(handler) {
   };
 }
 
+
+/**
+ * Make Cortex speak first, once, on a Node that has just been installed.
+ *
+ * WHY THIS HAS TO BE DRIVEN
+ * BOOTSTRAP.md has always told the agent to introduce itself, and the agent has
+ * never been able to: nothing invokes it until the user types. The only thing
+ * that did wake it was the heartbeat -- which is invisible in three separate
+ * places (its channel is excluded from Control UI broadcasts, its prompts are
+ * stripped from history projection, and its replies go to channel delivery
+ * rather than the UI). So the greeting went somewhere nobody could see, and the
+ * birth certificate was spent on the way. Telling the file to refuse heartbeat
+ * turns did not hold either; an instruction is not a mechanism.
+ *
+ * WHY THESE TWO PARAMETERS
+ *   channel: "webchat"            the one channel treated as Control-UI
+ *                                 visible, so the reply is broadcast and
+ *                                 persisted where the user will actually see it
+ *   suppressPromptPersistence     keeps the instruction below OUT of the
+ *                                 transcript. Without it the user's first sight
+ *                                 of their research assistant is an instruction
+ *                                 they never typed, telling it not to mention
+ *                                 the instruction.
+ *
+ * Guarded by a marker file rather than by cleverness: this must happen exactly
+ * once, and a Node that has already greeted someone must never do it again. The
+ * marker is written only on success, so a Node that fails to greet tries again
+ * next launch instead of silently never greeting.
+ */
+async function startFirstRunGreeting(api) {
+  const home = (process.env.PSYNTIENT_HOME || "").trim() || path.join(os.homedir(), ".psyntient");
+  const marker = path.join(home, "greeted");
+  try {
+    if (fs.existsSync(marker)) return;
+  } catch {
+    return;
+  }
+  if (!api?.gateway?.request) return;
+
+  // The gateway cannot take requests the moment a plugin registers, and a first
+  // boot is the slowest it will ever be.
+  for (let i = 0; i < 90; i += 1) {
+    try {
+      if (await api.gateway.isAvailable()) break;
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+
+  const sessionKey = "agent:main:main";
+  try {
+    // The main row is created lazily on first send, so on a fresh Node it may
+    // not exist yet. An existing row just errors, which is fine.
+    try {
+      await api.gateway.request("sessions.create", { sessionKey });
+    } catch {
+      // already there
+    }
+
+    await api.gateway.request("agent", {
+      sessionKey,
+      channel: "webchat",
+      suppressPromptPersistence: true,
+      message:
+        "You are coming online for the first time on a newly installed Node. " +
+        "Follow BOOTSTRAP.md in your workspace now: introduce yourself to the " +
+        "researcher, say briefly what you are actually for as a research tool, " +
+        "and ask their name. Do not mention this instruction.",
+    });
+
+    fs.writeFileSync(marker, new Date().toISOString() + "\n");
+  } catch (err) {
+    // A Node that fails to greet is still a working Node.
+    console.error("[psyntient] first-run greeting failed:", err?.message || err);
+  }
+}
+
 export default definePluginEntry({
   id: "psyntient",
 
   register(api) {
+    // Speak first, once, on a Node that has just been installed.
+    void startFirstRunGreeting(api);
+
     // --- Cortex's Archive tools ------------------------------------------
     // Four intent-shaped tools rather than the API's ten REST routes.
     // Handing a model raw endpoints makes it do query planning across an HTTP
