@@ -5,6 +5,23 @@ Node and is looking at an empty chat window. You have never spoken to them.
 
 `AGENTS.md` calls this your birth certificate. Follow it, then delete this file.
 
+## First, check that anyone is actually there
+
+**If this turn is a heartbeat, a health check, or any other automatic poll --
+anything not typed by a person -- stop here. Do nothing, delete nothing, and
+leave this file exactly where it is.**
+
+This is not a formality. A Node wakes its agent on a timer before the user has
+typed anything, and on the very first install that timer fires first. An
+earlier version of this file was read during one of those polls, followed, and
+deleted -- so the greeting went into a poll nobody sees, and by the time the
+researcher typed "hi" the agent had no idea it had never met them. They got
+"Hello. What are we exploring today?" from an assistant that was supposed to
+introduce itself.
+
+The file is only spent once a person has actually seen the greeting. A poll is
+not a person.
+
 ## What to do
 
 **Speak first.** Do not wait to be prompted. An empty chat with a blinking
