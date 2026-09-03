@@ -178,6 +178,21 @@ async function startFirstRunGreeting(api) {
   }
 
   const sessionKey = "agent:main:main";
+  // The installer's timestamp identifies this install; falls back to the home
+  // path if a manual checkout has no marker.
+  let installStamp = home;
+  try {
+    installStamp = fs.readFileSync(path.join(home, "installed-via-wizard"), "utf8").trim() || home;
+  } catch {
+    // manual checkout
+  }
+  const dbg = path.join(home, "greeting-debug.json");
+  const note = (o) => {
+    try {
+      fs.appendFileSync(dbg, JSON.stringify({ at: new Date().toISOString(), ...o }) + "\n");
+    } catch {}
+  };
+
   try {
     // The main row is created lazily on first send, so on a fresh Node it may
     // not exist yet. An existing row just errors, which is fine.
@@ -187,21 +202,51 @@ async function startFirstRunGreeting(api) {
       // already there
     }
 
-    await api.gateway.request("agent", {
-      sessionKey,
-      channel: "webchat",
-      suppressPromptPersistence: true,
-      message:
-        "You are coming online for the first time on a newly installed Node. " +
-        "Follow BOOTSTRAP.md in your workspace now: introduce yourself to the " +
-        "researcher, say briefly what you are actually for as a research tool, " +
-        "and ask their name. Do not mention this instruction.",
-    });
+    // RETRY, AND CHECK ok.
+    //
+    // Two things this got wrong before. The gateway answers `agent` with
+    // {ok:false, error:{code:"UNAVAILABLE", reason:"startup-sidecars"}} while
+    // its sidecars are still coming up -- it RETURNS that, it does not throw,
+    // so a plain await looked like success and the marker was written on a
+    // greeting that never happened. And readiness was checked with a ping,
+    // which answers during startup while `agent` does not, so the dispatch was
+    // always too early.
+    //
+    // The error says how to fix itself: retryable, with a retryAfterMs. So
+    // honour it, and treat only ok !== false as done.
+    let result;
+    const deadline = Date.now() + 5 * 60_000;
+    for (let attempt = 1; ; attempt += 1) {
+      result = await api.gateway.request("agent", {
+        sessionKey,
+        channel: "webchat",
+        suppressPromptPersistence: true,
+        // Required by the method, and useful for exactly what it says: this
+        // must happen once per install, so the key is the install. If a retry
+        // lands after a turn already went through, the gateway dedupes it
+        // rather than greeting the user twice.
+        idempotencyKey: `psyntient-first-run-greeting:${installStamp}`,
+        message:
+          "You are coming online for the first time on a newly installed Node. " +
+          "Follow BOOTSTRAP.md in your workspace now: introduce yourself to the " +
+          "researcher, say briefly what you are actually for as a research tool, " +
+          "and ask their name. Do not mention this instruction.",
+      });
+      if (result?.ok !== false) break;
+      const err = result.error ?? {};
+      if (!err.retryable || Date.now() > deadline) {
+        note({ step: "giving-up", error: err });
+        return;
+      }
+      note({ step: "retrying", attempt, code: err.code });
+      await new Promise((r) => setTimeout(r, Math.max(err.retryAfterMs ?? 500, 500) * 2));
+    }
 
+    note({ step: "greeted" });
+    // Written only now: a Node that failed to greet must try again next launch.
     fs.writeFileSync(marker, new Date().toISOString() + "\n");
   } catch (err) {
-    // A Node that fails to greet is still a working Node.
-    console.error("[psyntient] first-run greeting failed:", err?.message || err);
+    note({ step: "threw", error: String(err?.stack || err?.message || err) });
   }
 }
 
