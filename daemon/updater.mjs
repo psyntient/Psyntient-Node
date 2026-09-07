@@ -230,7 +230,47 @@ async function fetchEngineArtifact() {
 
 // --- git helpers ----------------------------------------------------------
 
+// True once `git --version` has actually succeeded on this machine, this
+// process. Checked once per process rather than once per git() call: this
+// process is a long-running daemon, and the answer does not change mid-run.
+let gitAvailable;
+
+// checkGitAvailable turns a mid-operation git failure into an early, specific
+// one, before check()/apply() have touched anything.
+//
+// WHY THIS EXISTS: on a Mac that has never opened Terminal -- true of every
+// non-developer, which is who Check for updates is FOR -- /usr/bin/git is a
+// stub that forwards to the real git inside the Xcode Command Line Tools, and
+// without those installed it fails with `xcrun: error: invalid active
+// developer path ... missing xcrun at:
+// /Library/Developer/CommandLineTools/usr/bin/xcrun`. That text was already
+// reaching the UI -- the route wrapping check()/apply() catches any thrown
+// error and shows it as-is -- but as whatever raw stderr the FIRST git call
+// inside check()/apply() happened to produce, which names neither Psyntient
+// nor a fix. This runs the same probe first and replaces it with one.
+//
+// The installer no longer has this problem (it clones with go-git, compiled
+// in, no system git involved) -- but an install that already succeeded before
+// that fix shipped, or was carried over from a machine where git happened to
+// already work, can still reach an update on a machine where it does not.
+async function checkGitAvailable() {
+  if (gitAvailable === true) return;
+  try {
+    await run("git", ["--version"], { maxBuffer: 1024 });
+    gitAvailable = true;
+  } catch {
+    gitAvailable = false;
+    throw new Error(
+      "Updating needs git, which is not usable on this machine yet. " +
+        "Open Terminal, run: xcode-select --install " +
+        "(you do not need the full Xcode app, only the Command Line Tools), " +
+        "accept the dialog, wait a few minutes, then try again.",
+    );
+  }
+}
+
 async function git(cwd, args) {
+  await checkGitAvailable();
   const { stdout } = await run("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 });
   return stdout.trim();
 }
