@@ -56,6 +56,11 @@ async function readArea(store, projectRel, area, { withText }) {
         await walk(childRel, rel);
         continue;
       }
+      // Dotfiles are bookkeeping, not project material -- archive-sync.mjs's
+      // .sync-log.json in Syncable_Data_Files/ is the concrete case, but this
+      // is area-generic on purpose: nothing a viewer opens a project to see
+      // starts with a dot.
+      if (entry.name.startsWith(".")) continue;
       total += 1;
       if (entries.length >= LIST_LIMIT) continue;
 
@@ -124,15 +129,28 @@ export async function readProject(projectId, { device = null } = {}) {
   const summary = matches[0];
   const store = getProvider();
   // Notes and analyses carry text because reading them is the point of opening
-  // a project; sessions and exports do not, because they are capture volume.
+  // a project; sessions do not, because captures are volume, not something
+  // read inline. Exports USED to be capture-volume-only too, but
+  // project-import.mjs's classifier now also lands anything that isn't an
+  // image or a known capture extension there -- imported/uploaded/watch-dir
+  // .md/.txt/.csv content (observation packets included) included. Denying
+  // it text meant the preview feature could never show it, no matter the
+  // extension. TEXT_EXT still gates what actually gets read either way, so
+  // this changes nothing for genuinely binary exports.
   const areas = await Promise.all([
     readArea(store, summary.path, "sessions", { withText: false }),
     readArea(store, summary.path, "notes", { withText: true }),
     readArea(store, summary.path, "analyses", { withText: true }),
-    readArea(store, summary.path, "exports", { withText: false }),
+    readArea(store, summary.path, "exports", { withText: true }),
     // Binary like sessions/exports -- an image's content is the point, not
     // its bytes read as text.
     readArea(store, summary.path, "images", { withText: false }),
+    // packet-compat.mjs stages files here after a real compatibility check --
+    // this is what lets someone actually SEE that a check did something,
+    // rather than the only proof being a file listing they'd have to think
+    // to check on disk. Text on: what's staged here is exactly Observation
+    // Packet content, worth reading in place same as notes/analyses.
+    readArea(store, summary.path, "Syncable_Data_Files", { withText: true }),
   ]);
 
   return { ok: true, storage: store.id, project: summary, areas };

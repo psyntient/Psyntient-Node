@@ -256,9 +256,13 @@ export async function scanVault() {
       // exist and how many files each holds. It is what a viewer needs to show
       // a project has notes without this index ever holding what they say.
       const material = {};
-      for (const kind of ["notes", "analyses", "exports", "images"]) {
+      for (const kind of ["notes", "analyses", "exports", "images", "Syncable_Data_Files"]) {
         const entries = await store.listDir(`${projectRel}/${kind}`);
-        material[kind] = entries.filter((e) => !e.isDirectory).length;
+        // Excludes dotfiles -- archive-sync.mjs's own .sync-log.json bookkeeping
+        // lives in Syncable_Data_Files/ once a project has actually synced, and
+        // it is not a staged packet; counting it would make the number climb on
+        // its own after every sync run rather than reflecting what's staged.
+        material[kind] = entries.filter((e) => !e.isDirectory && !e.name.startsWith(".")).length;
       }
 
       projects.push({

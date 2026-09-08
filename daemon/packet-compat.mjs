@@ -149,15 +149,18 @@ function uniqueDestPath(dir, filename) {
  * every compatible file into Syncable_Data_Files/.
  *
  * @param {string} projectId
- * @param {{ move?: boolean }} [options] - `move` deletes the source after
- *   staging (the "copy & delete" option); default is copy, which is the
- *   safer default -- a compatibility verdict can go stale if the source
- *   changes later, and a copy makes "what did we actually submit" an
- *   honest, frozen snapshot.
+ * @param {{ move?: boolean }} [options] - Default is MOVE: a compatible file
+ *   is staged into Syncable_Data_Files/ and removed from its source area, so
+ *   a project never holds two copies of the same packet at once. This is
+ *   deliberately the opposite default from the external-directory import
+ *   step (project-watch.mjs), which defaults to copy -- that default is
+ *   about not touching a researcher's own files outside the Vault; this one
+ *   is about not duplicating a file inside it once staged. Pass
+ *   `{ move: false }` to keep the source copy instead.
  */
 export function checkProjectCompatibility(projectId, options = {}) {
   assertSafeId(projectId, "projectId");
-  const move = options.move === true;
+  const move = options.move !== false;
   const projectDir = vaultProjectDir(projectId);
   if (!fs.existsSync(projectDir)) {
     throw new Error(`Project "${projectId}" does not exist.`);
@@ -196,10 +199,13 @@ export function checkProjectCompatibility(projectId, options = {}) {
 /**
  * Runs the compatibility check on ONE specific file already inside a
  * project (any source area), rather than the whole project.
+ *
+ * Same MOVE default as checkProjectCompatibility -- see that function's doc
+ * comment.
  */
 export function checkFileCompatibility(projectId, relPath, options = {}) {
   assertSafeId(projectId, "projectId");
-  const move = options.move === true;
+  const move = options.move !== false;
   const projectDir = vaultProjectDir(projectId);
   const topSegment = String(relPath || "").split(path.sep)[0];
   if (!SOURCE_AREAS.includes(topSegment)) {

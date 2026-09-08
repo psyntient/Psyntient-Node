@@ -409,13 +409,19 @@ export default definePluginEntry({
           Type.String({ description: 'One file, relative to the project (e.g. "sessions/scan1.json"). Omit to check the whole project.' }),
         ),
         move: Type.Optional(
-          Type.Boolean({ description: "Move instead of copy into Syncable_Data_Files (removes the original). Default: copy." }),
+          Type.Boolean({
+            description:
+              "Default true: a compatible file is staged into Syncable_Data_Files/ and removed from its source area, so the project never holds two copies of the same packet. Pass false to keep the source copy instead.",
+          }),
         ),
       }),
       execute: async (_toolCallId, params) => {
         const compat = await daemonModule("packet-compat.mjs");
         const projectId = String(params?.projectId ?? "");
-        const move = params?.move === true;
+        // Only override the function's own move-by-default when the caller
+        // actually said something -- omitting the field here must not read
+        // as "false", or every call through this tool silently forces copy.
+        const move = params?.move;
         const result =
           typeof params?.path === "string" && params.path.trim()
             ? compat.checkFileCompatibility(projectId, params.path.trim(), { move })
@@ -1044,16 +1050,18 @@ export default definePluginEntry({
             const projectId = String(body.projectId ?? "");
             activeRun = { projectId, index: 0, total: 0, done: false, result: null, error: null };
             // Fire-and-forget on purpose; the client polls GET for progress.
-            // Stage first (packet-compat.mjs's content check, copy default),
-            // then submit whatever is in Syncable_Data_Files/ -- one "run"
-            // still does the whole pipeline, same as the old direct-from-
-            // sessions/ submit did, just through the correct staging step.
-            // No per-packet progress from this path (submission is the only
+            // Stage first (packet-compat.mjs's content check, move default --
+            // a staged file is removed from its source area, so the project
+            // never ends up holding two copies of the same packet), then
+            // submit whatever is in Syncable_Data_Files/ -- one "run" still
+            // does the whole pipeline, same as the old direct-from-sessions/
+            // submit did, just through the correct staging step. No
+            // per-packet progress from this path (submission is the only
             // part that takes real time, and it does not report incrementally);
             // index/total jump straight to done rather than count up.
             void (async () => {
               const compat = await daemonModule("packet-compat.mjs");
-              compat.checkProjectCompatibility(projectId, { move: false });
+              compat.checkProjectCompatibility(projectId);
               return sync.syncProjectToArchive(projectId);
             })()
               .then((result) => {
@@ -1208,7 +1216,10 @@ export default definePluginEntry({
           if (action === "check-compat") {
             try {
               const compat = await daemonModule("packet-compat.mjs");
-              const move = body.move === true;
+              // Undefined, not a forced false, when the caller didn't say --
+              // packet-compat.mjs's own default is move; passing false here
+              // for every unset request would silently override it to copy.
+              const move = body.move;
               if (typeof body.path === "string" && body.path.trim()) {
                 return sendJson(res, 200, compat.checkFileCompatibility(projectId, body.path.trim(), { move }));
               }
