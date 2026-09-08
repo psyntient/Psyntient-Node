@@ -353,6 +353,92 @@ export default definePluginEntry({
       },
     });
 
+    archiveTool({
+      name: "attach_file_to_project",
+      label: "Save a file into a project",
+      description:
+        "Save a file into a project's Vault storage -- a file the user attached in this chat, or one you generated yourself. The project must already exist; create it first (via your project-creation capability) if it does not. Content-blind routing: it lands in images/ for pictures, sessions/ for known raw recording formats, exports/ for everything else -- this does not judge whether the content is Archive-syncable, only where to file it.",
+      parameters: Type.Object({
+        projectId: Type.String({ description: "Project to save into, e.g. thesis-chapter-3." }),
+        filename: Type.String({
+          description: 'Filename to save as, e.g. "eeg_topomap.png". Kept if safe, sanitized otherwise.',
+        }),
+        dataUrl: Type.String({
+          description:
+            "The file's content, either as the exact data: URL a chat attachment arrives as (data:<mime>;base64,<data>), or bare base64 if you generated the file yourself.",
+        }),
+      }),
+      execute: async (_toolCallId, params) => {
+        const importer = await daemonModule("project-import.mjs");
+        const raw = String(params?.dataUrl ?? "");
+        // Accepts either shape: the literal data: URL an attachment arrives
+        // as, or bare base64 if the caller already has just the payload.
+        const match = /^data:[^,]*;base64,(.*)$/s.exec(raw);
+        const base64 = match ? match[1] : raw;
+        if (!base64.trim()) {
+          return text("No file content given -- nothing was saved.");
+        }
+        let data;
+        try {
+          data = Buffer.from(base64, "base64");
+        } catch {
+          return text("dataUrl was not valid base64 -- nothing was saved.");
+        }
+        if (data.length === 0) {
+          return text("Decoded to an empty file -- nothing was saved.");
+        }
+        const result = importer.importFileToProject({
+          projectId: String(params?.projectId ?? ""),
+          filename: String(params?.filename ?? "file"),
+          data,
+        });
+        return text(
+          `Saved "${result.filename}" into ${result.projectId}/${result.area}/ (${result.bytes} bytes).`,
+        );
+      },
+    });
+
+    archiveTool({
+      name: "check_sync_compatibility",
+      label: "Check what in a project is Archive-syncable",
+      description:
+        "Checks a project's files for Observation-Packet content and stages the ones that qualify into Syncable_Data_Files/, ready for sync_project_to_archive. Content-based, not filename-based -- any file whose CONTENT has the required fields (subject_id, timestamp, modalities, neural_data, phenomenology_available, an id, and affirmative unwithdrawn consent) is a candidate, regardless of extension. This is a deterministic check, not a judgment call -- consent especially is never inferred, only read. Omit `path` to check the whole project; pass it to check one file.",
+      parameters: Type.Object({
+        projectId: Type.String({ description: "Project to check." }),
+        path: Type.Optional(
+          Type.String({ description: 'One file, relative to the project (e.g. "sessions/scan1.json"). Omit to check the whole project.' }),
+        ),
+        move: Type.Optional(
+          Type.Boolean({ description: "Move instead of copy into Syncable_Data_Files (removes the original). Default: copy." }),
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        const compat = await daemonModule("packet-compat.mjs");
+        const projectId = String(params?.projectId ?? "");
+        const move = params?.move === true;
+        const result =
+          typeof params?.path === "string" && params.path.trim()
+            ? compat.checkFileCompatibility(projectId, params.path.trim(), { move })
+            : compat.checkProjectCompatibility(projectId, { move });
+        return text(result);
+      },
+    });
+
+    archiveTool({
+      name: "sync_project_to_archive",
+      label: "Submit staged files to the Noetic Archive",
+      description:
+        "Submits every file currently in a project's Syncable_Data_Files/ to the real Noetic Archive Ingestion Queue, as Observation Packets. Run check_sync_compatibility first -- this submits whatever is already staged, it does not re-check content. Already-submitted files (tracked per project) are skipped, not resubmitted. This is a REAL submission to shared infrastructure the Archive's own maintainer reviews -- only call this when the user has actually asked to sync, never speculatively.",
+      parameters: Type.Object({
+        projectId: Type.String({ description: "Project to sync." }),
+      }),
+      execute: async (_toolCallId, params) => {
+        const sync = await daemonModule("archive-sync.mjs");
+        const result = await sync.syncProjectToArchive(String(params?.projectId ?? ""));
+        return text(result);
+      },
+    });
+
     // --- Onboarding gate state -------------------------------------------
     // GET  -> { hasProvider, isPaired, completed }
     // POST -> { action: "complete" }
@@ -956,19 +1042,38 @@ export default definePluginEntry({
               return sendJson(res, 409, { ok: false, error: "A sync is already running." });
             }
             const projectId = String(body.projectId ?? "");
-            const dir = await vaultProjectDir(projectId);
             activeRun = { projectId, index: 0, total: 0, done: false, result: null, error: null };
             // Fire-and-forget on purpose; the client polls GET for progress.
-            void sync
-              .syncProject(dir, {
-                onProgress: (p) => {
-                  activeRun.index = p.index + 1;
-                  activeRun.total = p.total;
-                  activeRun.sessionId = p.sessionId;
-                },
-              })
+            // Stage first (packet-compat.mjs's content check, copy default),
+            // then submit whatever is in Syncable_Data_Files/ -- one "run"
+            // still does the whole pipeline, same as the old direct-from-
+            // sessions/ submit did, just through the correct staging step.
+            // No per-packet progress from this path (submission is the only
+            // part that takes real time, and it does not report incrementally);
+            // index/total jump straight to done rather than count up.
+            void (async () => {
+              const compat = await daemonModule("packet-compat.mjs");
+              compat.checkProjectCompatibility(projectId, { move: false });
+              return sync.syncProjectToArchive(projectId);
+            })()
               .then((result) => {
-                activeRun = { ...activeRun, done: true, result };
+                // psyntient-sync.ts's SyncRun.result expects submitted/failed as
+                // COUNTS (its badge does `result.submitted` in a template and
+                // `result.failed > 0`) -- archive-sync.mjs's own shape carries
+                // the fuller arrays (filenames, per-file errors), which the
+                // check-compat/sync-to-archive actions above return as-is. Both
+                // are kept: the arrays for detail, counts for that one legacy
+                // consumer.
+                activeRun = {
+                  ...activeRun,
+                  done: true,
+                  result: {
+                    ...result,
+                    submitted: result.submitted.length,
+                    failed: result.errors.length,
+                    message: `Queued ${result.submitted.length} packet(s) for review.`,
+                  },
+                };
               })
               .catch((err) => {
                 activeRun = {
@@ -1098,6 +1203,60 @@ export default definePluginEntry({
             });
             deleteVaultProject(projectId);
             return sendJson(res, 200, { ok: true, deleted: projectId });
+          }
+
+          if (action === "check-compat") {
+            try {
+              const compat = await daemonModule("packet-compat.mjs");
+              const move = body.move === true;
+              if (typeof body.path === "string" && body.path.trim()) {
+                return sendJson(res, 200, compat.checkFileCompatibility(projectId, body.path.trim(), { move }));
+              }
+              return sendJson(res, 200, compat.checkProjectCompatibility(projectId, { move }));
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+
+          if (action === "sync-to-archive") {
+            try {
+              const sync = await daemonModule("archive-sync.mjs");
+              return sendJson(res, 200, await sync.syncProjectToArchive(projectId));
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+
+          if (action === "set-watch-dir") {
+            const dir = typeof body.dir === "string" ? body.dir.trim() : "";
+            if (!dir) return sendJson(res, 400, { ok: false, error: "dir required" });
+            try {
+              const watcher = await daemonModule("project-watch.mjs");
+              return sendJson(res, 200, watcher.bindWatchDirectory(projectId, dir));
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+
+          if (action === "unset-watch-dir") {
+            try {
+              const watcher = await daemonModule("project-watch.mjs");
+              return sendJson(res, 200, watcher.unbindWatchDirectory(projectId));
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
 
           return sendJson(res, 400, { ok: false, error: "unknown action" });

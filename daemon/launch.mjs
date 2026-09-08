@@ -14,6 +14,7 @@
 // whether the user sees onboarding or goes straight to chat.
 import { ensureRunning as ensureGatewayRunning, paths as gatewayPaths } from "./openclaw-control.mjs";
 import { ensureRunning as ensureHeartbeatRunning } from "./heartbeat-control.mjs";
+import { ensureRunning as ensureDirectoryWatchRunning } from "./directory-watch-control.mjs";
 import { activateLocal as activateLocalVault } from "./vault.mjs";
 import { ensureScaffold as ensureWorkingMemoryScaffold } from "./working-memory.mjs";
 import fs from "node:fs";
@@ -57,6 +58,9 @@ async function main() {
   // first since it's independent of the Gateway/key/pairing checks below
   // (Node<->psyntient.io identity has nothing to do with LLM keys).
   ensureHeartbeatRunning();
+  // Independent too -- scans any project's bound directory for new files.
+  // Idempotent and cheap to call on every launch, same as the heartbeat loop.
+  ensureDirectoryWatchRunning();
 
   // Also independent of everything else — just confirms the configured
   // local vault directory exists. See CLAUDE.md section 8: entirely
