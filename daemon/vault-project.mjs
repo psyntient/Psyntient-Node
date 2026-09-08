@@ -130,6 +130,9 @@ export async function readProject(projectId, { device = null } = {}) {
     readArea(store, summary.path, "notes", { withText: true }),
     readArea(store, summary.path, "analyses", { withText: true }),
     readArea(store, summary.path, "exports", { withText: false }),
+    // Binary like sessions/exports -- an image's content is the point, not
+    // its bytes read as text.
+    readArea(store, summary.path, "images", { withText: false }),
   ]);
 
   return { ok: true, storage: store.id, project: summary, areas };

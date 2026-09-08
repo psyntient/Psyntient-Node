@@ -104,14 +104,14 @@ function workingProjectDir(projectId) {
   return path.join(CORTEX_PROJECTS_DIR, projectId);
 }
 
-function vaultProjectDir(projectId) {
+export function vaultProjectDir(projectId) {
   return path.join(getVaultRoot(), "Devices", deviceName(), projectId);
 }
 
 // Filenames only -- no subdirectories, no path traversal. Deliberately
 // stricter than SAFE_ID (allows dots, for extensions) but still a plain
 // token, not an arbitrary relative path.
-const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+export const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
 const ARTIFACT_CONTENT_TYPES = {
   ".png": "image/png",
@@ -131,6 +131,8 @@ const ARTIFACT_CONTENT_TYPES = {
 // has been synced/erased. Returns null (not a throw) when nothing matches,
 // since "not found" is a normal, expected outcome for a route to turn into
 // a 404 rather than a 500.
+export { assertSafeId };
+
 export function resolveProjectArtifact(projectId, filename) {
   assertSafeId(projectId, "projectId");
   if (typeof filename !== "string" || !SAFE_FILENAME.test(filename)) {
@@ -239,6 +241,16 @@ export function createProject({ projectId, title, dataTypes }) {
   fs.mkdirSync(path.join(vaultDir, "notes"), { recursive: true });
   fs.mkdirSync(path.join(vaultDir, "analyses"), { recursive: true });
   fs.mkdirSync(path.join(vaultDir, "exports"), { recursive: true });
+  // Pictures, graphs, figures -- distinct from analyses/ (which is written
+  // material) and exports/ (agent work product). A researcher's own scan
+  // images, setup photos and generated charts have no honest home in either.
+  fs.mkdirSync(path.join(vaultDir, "images"), { recursive: true });
+  // Where a compatibility check deposits files it has determined are
+  // Observation-Packet-shaped, staged for the sync procedure. Distinct from
+  // the four material areas above: those are organized by what a file IS
+  // (a note, an analysis, a recording); this is organized by whether a
+  // file's CONTENT is Archive-syncable, which cuts across all of them.
+  fs.mkdirSync(path.join(vaultDir, "Syncable_Data_Files"), { recursive: true });
   const projectJsonPath = path.join(vaultDir, ".project.json");
   if (!fs.existsSync(projectJsonPath)) {
     fs.writeFileSync(

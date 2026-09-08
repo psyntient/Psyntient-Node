@@ -656,6 +656,84 @@ export default definePluginEntry({
       }),
     });
 
+    // --- Vault file upload ---------------------------------------------------
+    // POST ?project=<id>  body: raw file bytes  header: X-Filename: <name>
+    //
+    // No multipart parser: the browser sends a File/Blob directly as the
+    // fetch body (`fetch(url, {method:"POST", body: file})`), which is the
+    // whole file's raw bytes with no multipart framing to decode -- so the
+    // only thing this route needs beyond the body is the original filename,
+    // carried in a header because the body IS the file, nothing else can
+    // ride alongside it. Where the file lands (which area, what final name)
+    // is decided once, by project-import.mjs -- this route's only job is
+    // getting bytes and a name to it safely.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/vault/upload",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "POST") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        const url = new URL(req.url, "http://localhost");
+        const projectId = url.searchParams.get("project");
+        if (!projectId) {
+          return sendJson(res, 400, { ok: false, error: "project required" });
+        }
+        const rawName = req.headers["x-filename"];
+        const filename = Array.isArray(rawName) ? rawName[0] : rawName;
+        if (!filename) {
+          return sendJson(res, 400, { ok: false, error: "X-Filename header required" });
+        }
+        // Decoded because a filename with spaces/parens (very ordinary for
+        // research data -- "scan 1 (final).edf") is not a valid raw header
+        // value; the browser side encodeURIComponent()s it going out.
+        let decodedName;
+        try {
+          decodedName = decodeURIComponent(filename);
+        } catch {
+          decodedName = filename;
+        }
+
+        // Bounded read, not because a real recording can't be this size, but
+        // because an unbounded one is a way to exhaust this process's memory
+        // -- this reads the whole body into memory before writing it, same as
+        // readJsonBody does for every other route. 512 MiB comfortably covers
+        // a single EEG/EDF session file with headroom to spare.
+        const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+        const chunks = [];
+        let total = 0;
+        for await (const chunk of req) {
+          total += chunk.length;
+          if (total > MAX_UPLOAD_BYTES) {
+            req.destroy();
+            return sendJson(res, 413, {
+              ok: false,
+              error: `File exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
+            });
+          }
+          chunks.push(chunk);
+        }
+        if (total === 0) {
+          return sendJson(res, 400, { ok: false, error: "empty upload" });
+        }
+
+        try {
+          const importer = await daemonModule("project-import.mjs");
+          const result = importer.importFileToProject({
+            projectId,
+            filename: decodedName,
+            data: Buffer.concat(chunks),
+          });
+          return sendJson(res, 200, { ok: true, ...result });
+        } catch (err) {
+          return sendJson(res, 200, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
     // --- Self-update --------------------------------------------------------
     // GET                    -> what an update would do (and the auto toggle)
     // POST {action:"apply"}  -> Server-Sent Events: progress, then a result

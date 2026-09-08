@@ -256,7 +256,7 @@ export async function scanVault() {
       // exist and how many files each holds. It is what a viewer needs to show
       // a project has notes without this index ever holding what they say.
       const material = {};
-      for (const kind of ["notes", "analyses", "exports"]) {
+      for (const kind of ["notes", "analyses", "exports", "images"]) {
         const entries = await store.listDir(`${projectRel}/${kind}`);
         material[kind] = entries.filter((e) => !e.isDirectory).length;
       }
