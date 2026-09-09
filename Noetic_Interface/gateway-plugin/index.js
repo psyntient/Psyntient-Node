@@ -1249,7 +1249,11 @@ export default definePluginEntry({
             if (!dir) return sendJson(res, 400, { ok: false, error: "dir required" });
             try {
               const watcher = await daemonModule("project-watch.mjs");
-              return sendJson(res, 200, watcher.bindWatchDirectory(projectId, dir));
+              return sendJson(
+                res,
+                200,
+                watcher.bindWatchDirectory(projectId, dir, { deleteAfterImport: body.deleteAfterImport === true }),
+              );
             } catch (err) {
               return sendJson(res, 400, {
                 ok: false,

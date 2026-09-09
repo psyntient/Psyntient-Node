@@ -4,11 +4,20 @@
 // removes the "individually select files" step entirely -- point a
 // project at the folder once, and whatever lands there gets imported.
 //
-// READ-ONLY toward the watched directory, deliberately. This is not a
-// second Vault location the way setLocalPath() treats the Vault's own
-// storage folder (vault.mjs) -- the watched directory stays the user's,
-// organized however their own tooling already organizes it. Nothing here
-// ever renames, moves, or deletes a file inside it; only reads and copies.
+// READ-ONLY toward the watched directory BY DEFAULT. This is not a second
+// Vault location the way setLocalPath() treats the Vault's own storage
+// folder (vault.mjs) -- the watched directory stays the user's, organized
+// however their own tooling already organizes it. The one opt-in exception
+// is `deleteAfterImport`: a researcher who wants the folder to work as a
+// drop-and-it's-gone inbox, rather than a standing mirror, can ask for the
+// source file to be deleted right after a successful import. Nothing here
+// ever renames a file, and nothing ever deletes one that ISN'T a fresh,
+// successful import -- there is deliberately no mechanism that reacts to a
+// file going missing from the folder (a rename looks identical to a
+// delete at this layer, and inferring "delete the Vault's copy too" from
+// that ambiguity risked destroying imported data on what was actually a
+// rename or a reorganization). A vanished path is simply forgotten from
+// next tick's fingerprint state; nothing in the Vault is touched for it.
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -34,11 +43,20 @@ function writeProjectJson(projectId, meta) {
   fs.writeFileSync(p, JSON.stringify(meta, null, 2) + "\n");
 }
 
-/** Binds `dirPath` as the source a project auto-imports from. The directory
- *  must already exist -- unlike the Vault's own storage relocation, this is
- *  never created on the user's behalf; a nonexistent path here is a typo,
- *  not an intent to create a folder. */
-export function bindWatchDirectory(projectId, dirPath) {
+/**
+ * Binds `dirPath` as the source a project auto-imports from. The directory
+ * must already exist -- unlike the Vault's own storage relocation, this is
+ * never created on the user's behalf; a nonexistent path here is a typo,
+ * not an intent to create a folder.
+ *
+ * `deleteAfterImport` (default false, "leave the originals") makes a
+ * successful import also remove the source file -- an explicit, per-binding
+ * choice, same shape as the upload flows' own copy-vs-delete option. Off by
+ * default: turning a folder into an inbox that eats what's dropped in it is
+ * a bigger behavior change than importing it, and should never happen
+ * because the field was merely left unset.
+ */
+export function bindWatchDirectory(projectId, dirPath, { deleteAfterImport = false } = {}) {
   assertSafeId(projectId, "projectId");
   const projectDir = vaultProjectDir(projectId);
   if (!fs.existsSync(projectDir)) {
@@ -64,14 +82,16 @@ export function bindWatchDirectory(projectId, dirPath) {
 
   const meta = readProjectJson(projectId);
   meta.watchDir = resolved;
+  meta.watchDeleteAfterImport = deleteAfterImport === true;
   writeProjectJson(projectId, meta);
-  return { ok: true, projectId, watchDir: resolved };
+  return { ok: true, projectId, watchDir: resolved, deleteAfterImport: meta.watchDeleteAfterImport };
 }
 
 export function unbindWatchDirectory(projectId) {
   assertSafeId(projectId, "projectId");
   const meta = readProjectJson(projectId);
   delete meta.watchDir;
+  delete meta.watchDeleteAfterImport;
   writeProjectJson(projectId, meta);
   return { ok: true, projectId };
 }
@@ -106,6 +126,11 @@ function walk(dir, baseDir, out) {
  * imported. Safe to call repeatedly -- a file already imported (same
  * relative path, size and mtime as last time) is skipped, so re-running
  * this on an unchanged directory does nothing.
+ *
+ * If the binding opted into `deleteAfterImport`, a successful import also
+ * removes the source file -- see bindWatchDirectory's doc comment. A
+ * failed import never deletes anything, so a transient error is retried
+ * next tick instead of silently losing the source.
  */
 export function scanWatchedDirectory(projectId) {
   assertSafeId(projectId, "projectId");
@@ -154,6 +179,18 @@ export function scanWatchedDirectory(projectId) {
     try {
       const data = fs.readFileSync(full);
       const result = importFileToProject({ projectId, filename: path.basename(rel), data });
+      // Only after a confirmed-successful import, and only what was opted
+      // into at bind time -- deleting the source is the one exception to
+      // this module's read-only-by-default stance toward the watched
+      // directory (see the file header), never a side effect of scanning.
+      if (meta.watchDeleteAfterImport === true) {
+        try {
+          fs.unlinkSync(full);
+        } catch {
+          // The import already landed; a delete that fails (permissions, the
+          // file already gone) is not worth failing the scan over.
+        }
+      }
       imported.push({ source: rel, ...result });
     } catch (err) {
       errors.push({ source: rel, error: err instanceof Error ? err.message : String(err) });
