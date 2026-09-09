@@ -41,6 +41,11 @@ async function tick() {
         `[${timestamp()}] ${r.projectId}: imported ${r.imported.length} file(s) from ${r.watchDir}`,
       );
     }
+    if (r.mirrored?.length > 0) {
+      console.log(
+        `[${timestamp()}] ${r.projectId}: mirror-deleted ${r.mirrored.length} file(s) that vanished from ${r.watchDir}`,
+      );
+    }
     for (const e of r.errors) {
       console.error(`[${timestamp()}] ${r.projectId}: failed to import ${e.source}: ${e.error}`);
     }
