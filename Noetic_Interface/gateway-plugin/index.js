@@ -1244,6 +1244,39 @@ export default definePluginEntry({
             }
           }
 
+          // The Vault dashboard's actual "Sync" buttons (project-level and
+          // per-file) call this one action rather than composing check-compat
+          // + sync-to-archive themselves -- a file already staged still needs
+          // to actually submit, and a file not yet staged needs both steps,
+          // and neither the project nor a single file's caller should have to
+          // know which case it is. Omit `path` for the whole project.
+          if (action === "sync-now") {
+            try {
+              const compat = await daemonModule("packet-compat.mjs");
+              const sync = await daemonModule("archive-sync.mjs");
+              const relPath = typeof body.path === "string" ? body.path.trim() : "";
+              // A file the caller names inside Syncable_Data_Files/ is
+              // already staged -- packet-compat.mjs's checkFileCompatibility
+              // only knows the FIVE source areas it stages FROM and throws on
+              // anything else, so staging is skipped for exactly this case
+              // rather than treated as an error.
+              const alreadyStaged = relPath.startsWith("Syncable_Data_Files/");
+              const staged =
+                relPath && !alreadyStaged
+                  ? compat.checkFileCompatibility(projectId, relPath)
+                  : relPath
+                    ? null
+                    : compat.checkProjectCompatibility(projectId);
+              const submitted = await sync.syncProjectToArchive(projectId);
+              return sendJson(res, 200, { ok: true, staged, submitted });
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+
           if (action === "set-watch-dir") {
             const dir = typeof body.dir === "string" ? body.dir.trim() : "";
             if (!dir) return sendJson(res, 400, { ok: false, error: "dir required" });

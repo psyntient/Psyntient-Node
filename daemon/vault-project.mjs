@@ -16,6 +16,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { getProvider } from "./vault-storage.mjs";
 import { readLedger } from "./vault-ledger.mjs";
+import { checkPacketCompatibility } from "./packet-compat.mjs";
 
 /** Per-file text cap. Enough to read a note; far short of a transcript dump. */
 const TEXT_CHARS = 20_000;
@@ -82,12 +83,19 @@ async function readArea(store, projectRel, area, { withText }) {
         } catch {
           item.kind = "data";
         }
+        // Reuses the text already read above rather than a second pass --
+        // this is the real, content-based Archive check (packet-compat.mjs),
+        // not the loose session_id/neural_data probe just above. That probe
+        // decides display (packet vs. data); this decides whether a "Sync"
+        // action belongs next to the file at all.
+        if (raw !== null) item.syncable = checkPacketCompatibility(raw).compatible;
       } else if (withText && TEXT_EXT.has(ext)) {
         const raw = await store.readText(childRel);
         if (raw !== null) {
           item.kind = "text";
           item.text = raw.slice(0, TEXT_CHARS);
           item.truncated = raw.length > TEXT_CHARS;
+          item.syncable = checkPacketCompatibility(raw).compatible;
         }
       } else if (!TEXT_EXT.has(ext) && ext !== ".json") {
         // Recordings and other binaries: described, never opened. Size and
