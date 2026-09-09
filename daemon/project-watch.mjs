@@ -7,17 +7,28 @@
 // READ-ONLY toward the watched directory BY DEFAULT. This is not a second
 // Vault location the way setLocalPath() treats the Vault's own storage
 // folder (vault.mjs) -- the watched directory stays the user's, organized
-// however their own tooling already organizes it. The one opt-in exception
-// is `deleteAfterImport`: a researcher who wants the folder to work as a
-// drop-and-it's-gone inbox, rather than a standing mirror, can ask for the
-// source file to be deleted right after a successful import. Nothing here
-// ever renames a file, and nothing ever deletes one that ISN'T a fresh,
-// successful import -- there is deliberately no mechanism that reacts to a
-// file going missing from the folder (a rename looks identical to a
-// delete at this layer, and inferring "delete the Vault's copy too" from
-// that ambiguity risked destroying imported data on what was actually a
-// rename or a reorganization). A vanished path is simply forgotten from
-// next tick's fingerprint state; nothing in the Vault is touched for it.
+// however their own tooling already organizes it. Two opt-in exceptions,
+// both off by default, both explicit per-binding choices:
+//
+//   - `deleteAfterImport`: the source file is deleted right after a
+//     successful import, turning the folder into a drop-and-it's-gone
+//     inbox rather than a standing mirror.
+//   - `mirror`: when a file that WAS successfully imported later vanishes
+//     from the folder (folder confirmed reachable, path confirmed absent
+//     -- see scanWatchedDirectory), its Vault copy is deleted too. A
+//     rename in the watched folder is indistinguishable from a delete at
+//     this layer (old path gone, unrelated new path appeared), and this
+//     is deliberately NOT special-cased: every vanished path is treated
+//     as a delete, full stop. Accepted and documented, not an oversight
+//     -- Mirror is opt-in, so choosing it means choosing that tradeoff.
+//     One-directional only: deleting a file FROM the Vault never deletes
+//     anything in the watched folder.
+//
+// The two compose safely together on purpose: a file removed from the
+// watched folder BY deleteAfterImport is never treated as a Mirror-style
+// vanish (see scanWatchedDirectory) -- otherwise deleteAfterImport's own
+// cleanup would look identical to a user deletion and immediately undo
+// the import it just performed.
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -49,14 +60,14 @@ function writeProjectJson(projectId, meta) {
  * never created on the user's behalf; a nonexistent path here is a typo,
  * not an intent to create a folder.
  *
- * `deleteAfterImport` (default false, "leave the originals") makes a
- * successful import also remove the source file -- an explicit, per-binding
- * choice, same shape as the upload flows' own copy-vs-delete option. Off by
- * default: turning a folder into an inbox that eats what's dropped in it is
- * a bigger behavior change than importing it, and should never happen
- * because the field was merely left unset.
+ * `deleteAfterImport` and `mirror` (both default false) are independent
+ * choices -- see the file header for what each does and how they compose.
+ * Both off by default: turning a folder into an inbox that eats what's
+ * dropped in it, or a mirror that can delete Vault data on its own, is a
+ * bigger behavior change than plain importing, and neither should happen
+ * because a field was merely left unset.
  */
-export function bindWatchDirectory(projectId, dirPath, { deleteAfterImport = false } = {}) {
+export function bindWatchDirectory(projectId, dirPath, { deleteAfterImport = false, mirror = false } = {}) {
   assertSafeId(projectId, "projectId");
   const projectDir = vaultProjectDir(projectId);
   if (!fs.existsSync(projectDir)) {
@@ -83,8 +94,15 @@ export function bindWatchDirectory(projectId, dirPath, { deleteAfterImport = fal
   const meta = readProjectJson(projectId);
   meta.watchDir = resolved;
   meta.watchDeleteAfterImport = deleteAfterImport === true;
+  meta.watchMirror = mirror === true;
   writeProjectJson(projectId, meta);
-  return { ok: true, projectId, watchDir: resolved, deleteAfterImport: meta.watchDeleteAfterImport };
+  return {
+    ok: true,
+    projectId,
+    watchDir: resolved,
+    deleteAfterImport: meta.watchDeleteAfterImport,
+    mirror: meta.watchMirror,
+  };
 }
 
 export function unbindWatchDirectory(projectId) {
@@ -92,6 +110,7 @@ export function unbindWatchDirectory(projectId) {
   const meta = readProjectJson(projectId);
   delete meta.watchDir;
   delete meta.watchDeleteAfterImport;
+  delete meta.watchMirror;
   writeProjectJson(projectId, meta);
   return { ok: true, projectId };
 }
@@ -121,6 +140,12 @@ function walk(dir, baseDir, out) {
   }
 }
 
+/** True for a legacy state entry (bare fingerprint string, from before
+ *  Mirror needed to know WHERE an import landed) or the current shape. */
+function entryFingerprint(entry) {
+  return typeof entry === "string" ? entry : entry?.fp;
+}
+
 /**
  * Scans one project's bound directory and imports anything not already
  * imported. Safe to call repeatedly -- a file already imported (same
@@ -131,6 +156,16 @@ function walk(dir, baseDir, out) {
  * removes the source file -- see bindWatchDirectory's doc comment. A
  * failed import never deletes anything, so a transient error is retried
  * next tick instead of silently losing the source.
+ *
+ * If the binding opted into `mirror`, a path that WAS successfully
+ * imported and has since disappeared from the folder gets its Vault copy
+ * deleted too -- unless deleteAfterImport already removed it as part of
+ * that same import, in which case it was never carried into next tick's
+ * state to begin with (see below), so it can never look like a Mirror
+ * vanish. And if the Vault copy has already moved on its own (staged into
+ * Syncable_Data_Files/ by a compatibility check, or beyond), it is simply
+ * not found at its original spot and skipped -- Mirror only ever touches
+ * a file still sitting where the import first put it.
  */
 export function scanWatchedDirectory(projectId) {
   assertSafeId(projectId, "projectId");
@@ -142,7 +177,11 @@ export function scanWatchedDirectory(projectId) {
   if (!fs.existsSync(watchDir)) {
     // The bound folder was moved/deleted/unmounted (a network drive, a USB
     // drive). Not an error worth throwing over -- the binding is still
-    // recorded, and it will resume the moment the folder is back.
+    // recorded, and it will resume the moment the folder is back. Critically,
+    // this is NOT a Mirror vanish for anything: every path state remembers is
+    // simply left untouched below, because this function returns before ever
+    // reaching the vanish comparison. An unmounted drive must never look like
+    // its whole contents got deleted.
     return { ok: true, projectId, watched: true, watchDir, error: "directory not reachable" };
   }
 
@@ -159,6 +198,7 @@ export function scanWatchedDirectory(projectId) {
 
   const imported = [];
   const errors = [];
+  const mirrored = [];
   const nextState = {};
   for (const { full, rel } of files) {
     // Never re-import a project's own already-imported material if the
@@ -173,8 +213,10 @@ export function scanWatchedDirectory(projectId) {
       continue; // vanished between readdir and stat
     }
     const fp = fingerprint(rel, stat);
-    nextState[rel] = fp;
-    if (state[rel] === fp) continue; // unchanged since last scan
+    if (entryFingerprint(state[rel]) === fp) {
+      nextState[rel] = state[rel]; // unchanged since last scan; carry forward as-is
+      continue;
+    }
 
     try {
       const data = fs.readFileSync(full);
@@ -186,23 +228,51 @@ export function scanWatchedDirectory(projectId) {
       if (meta.watchDeleteAfterImport === true) {
         try {
           fs.unlinkSync(full);
+          // Deliberately NOT added to nextState: a file this scan itself
+          // deleted must not exist in next tick's "known" set, or a Mirror
+          // binding would see it "vanish" and delete the import that was
+          // just performed, seconds after performing it.
         } catch {
           // The import already landed; a delete that fails (permissions, the
-          // file already gone) is not worth failing the scan over.
+          // file already gone) is not worth failing the scan over. Falls
+          // through to the normal tracked-entry path below.
+          nextState[rel] = { fp, area: result.area, filename: result.filename };
         }
+      } else {
+        nextState[rel] = { fp, area: result.area, filename: result.filename };
       }
       imported.push({ source: rel, ...result });
     } catch (err) {
       errors.push({ source: rel, error: err instanceof Error ? err.message : String(err) });
-      // Keep the OLD fingerprint (or none) so a transient failure gets
-      // retried next tick instead of being marked done.
+      // Keep the OLD entry (or none) so a transient failure gets retried
+      // next tick instead of being marked done.
       if (state[rel]) nextState[rel] = state[rel];
-      else delete nextState[rel];
+    }
+  }
+
+  if (meta.watchMirror === true) {
+    for (const rel of Object.keys(state)) {
+      if (rel in nextState) continue; // still present (or freshly re-imported) this tick
+      const entry = state[rel];
+      // A legacy bare-fingerprint entry carries no area/filename -- there is
+      // nothing to locate, so nothing to delete. Not an error, just unknown.
+      if (typeof entry !== "object" || !entry?.area || !entry?.filename) continue;
+      const target = path.join(vaultProjectDir(projectId), entry.area, entry.filename);
+      if (!fs.existsSync(target)) continue; // already staged/moved/synced elsewhere -- link already severed
+      try {
+        fs.unlinkSync(target);
+        mirrored.push({ source: rel, area: entry.area, filename: entry.filename });
+      } catch (err) {
+        errors.push({
+          source: rel,
+          error: `mirror delete failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
   }
 
   fs.writeFileSync(statePath, JSON.stringify(nextState, null, 2) + "\n");
-  return { ok: true, projectId, watched: true, watchDir, scanned: files.length, imported, errors };
+  return { ok: true, projectId, watched: true, watchDir, scanned: files.length, imported, mirrored, errors };
 }
 
 /** Scans every project that has a watchDir bound. Called once per tick by

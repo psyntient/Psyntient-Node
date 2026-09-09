@@ -1252,7 +1252,10 @@ export default definePluginEntry({
               return sendJson(
                 res,
                 200,
-                watcher.bindWatchDirectory(projectId, dir, { deleteAfterImport: body.deleteAfterImport === true }),
+                watcher.bindWatchDirectory(projectId, dir, {
+                  deleteAfterImport: body.deleteAfterImport === true,
+                  mirror: body.mirror === true,
+                }),
               );
             } catch (err) {
               return sendJson(res, 400, {
