@@ -960,6 +960,7 @@ export default definePluginEntry({
     //                         + what it relates to
     // GET ?evidence=<id>   -> the exemplar packets behind an archetype
     // GET ?packet=<id>     -> one packet + what it exemplifies
+    // GET ?manifest=1      -> this Edition's own manifest + which figures exist
     //
     // Thin pass-through to daemon/archive-client.mjs. The token lives in
     // ~/.psyntient/node.key at mode 600 and must never reach a browser, so the
@@ -978,6 +979,7 @@ export default definePluginEntry({
         const family = url.searchParams.get("family");
         const evidence = url.searchParams.get("evidence");
         const packet = url.searchParams.get("packet");
+        const manifest = url.searchParams.get("manifest");
         try {
           if (id) return sendJson(res, 200, { ok: true, ...(await archive.getRecord(id)) });
           if (family) return sendJson(res, 200, { ok: true, ...(await archive.getFamily(family)) });
@@ -988,6 +990,7 @@ export default definePluginEntry({
             });
           }
           if (packet) return sendJson(res, 200, { ok: true, ...(await archive.getPacketDetail(packet)) });
+          if (manifest) return sendJson(res, 200, { ok: true, ...(await archive.getManifest()) });
           if (query) return sendJson(res, 200, { ok: true, ...(await archive.search(query)) });
           return sendJson(res, 200, { ok: true, ...(await archive.getMap()) });
         } catch (err) {
@@ -995,6 +998,44 @@ export default definePluginEntry({
           // states for a local-first app, not server faults. 200 with an error
           // field lets the viewer render an explanation instead of a stack.
           return sendJson(res, 200, {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    });
+
+    // --- Archive figure -----------------------------------------------------
+    // GET ?name=<figureName> -> one Edition-wide generated figure (image bytes)
+    //
+    // A separate route from /archive rather than another ?param on it: every
+    // other branch there returns JSON, and this one returns image bytes --
+    // mixing response shapes on one route makes both harder to reason about.
+    // The Archive's own /api/v1/figures/{name} already allowlists names, so
+    // this is a thin pass-through, same posture as the rest of this file.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/archive/figure",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        if (req.method !== "GET") {
+          return sendJson(res, 405, { ok: false, error: "method not allowed" });
+        }
+        const url = new URL(req.url, "http://localhost");
+        const name = url.searchParams.get("name");
+        if (!name) return sendJson(res, 400, { ok: false, error: "name required" });
+        try {
+          const archive = await daemonModule("archive-client.mjs");
+          const { contentType, buffer } = await archive.getFigure(name);
+          res.writeHead(200, {
+            "Content-Type": contentType,
+            "Content-Length": buffer.length,
+            // A figure is immutable for the life of an Edition, same
+            // reasoning as the Archive's own cache header on this route.
+            "Cache-Control": "public, max-age=3600",
+          });
+          return res.end(buffer);
+        } catch (err) {
+          return sendJson(res, 404, {
             ok: false,
             error: err instanceof Error ? err.message : String(err),
           });

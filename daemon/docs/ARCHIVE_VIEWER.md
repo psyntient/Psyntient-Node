@@ -256,18 +256,53 @@ to `/packets/{id}` + `/packets/{id}/archetypes` in parallel rather than
 through `getRecord()`'s archetype-then-packet fallback, since a caller here
 already knows the id is a packet.
 
-**Deliberately not built**: Edition-wide generated figures (the archetype
-network graph, confidence distribution, overlap heatmap The Library serves
-from `<edition>/visualizations/`). Those are matplotlib output generated
-once per Edition and read from the droplet's own local filesystem by The
-Library's own proxy — `archive.psyntient.io`'s public API, which is the
-only thing this Node talks to, has no endpoint for them (`/api/v1/manifest`,
-`/api/v1/figures`, `/api/v1/visualizations`, `/api/v1/edition` all 404,
-checked live). Reachable from here only if that API is extended to expose
-them; not something to build by reaching into droplet-local files, which
-this Node's architecture deliberately never does (see `PSYNTIENT_ARCHIVE_URL`
-and the traverse-never-mirror design note at the top of
-`archive-client.mjs`).
+### Edition-wide figures
+
+The archetype network graph, confidence distribution and overlap heatmap —
+matplotlib output generated once per Edition, not built live like the
+per-packet chart above. Originally out of reach: those figures live on the
+droplet's local filesystem, read directly by The Library's own proxy, and
+`archive.psyntient.io`'s public API — the only thing this Node talks to —
+had no endpoint for them (`/api/v1/manifest`, `/api/v1/figures` both 404'd,
+checked live).
+
+**Fixed at the source, not worked around.** Rather than have this Node
+reach into droplet-local files (which its architecture deliberately never
+does — see `PSYNTIENT_ARCHIVE_URL` and the traverse-never-mirror design
+note atop `archive-client.mjs`), the Archive API itself
+(`Noetic_API_Backend/app/main.py` on the droplet) gained two routes,
+`GET /api/v1/manifest` and `GET /api/v1/figures/{name}`, mirroring The
+Library's own `EDITION_DIR`-relative read pattern and figure allowlist —
+same directory, same reasoning, now reachable over the public API like
+everything else this client uses. `get_meta`'s inline "find the latest
+edition dir" logic was factored into a small shared helper both the new
+routes and it now call; behavior unchanged, confirmed live before and
+after. This is a change to shared production infrastructure other
+consumers depend on (The Architect, The Library, this Node), made with
+explicit sign-off, backed up before editing, and verified live (existing
+routes unaffected, new ones returning real data, traversal and
+non-allowlisted names both 404) before being treated as done.
+
+**Reached from the hero's "About this Edition" button**
+(`openEditionInfo()`/`renderEditionInfo()`): the manifest's own account of
+itself — `source`/`source_notes` stated plainly (own posture as the
+packetCount===0 notice elsewhere on this page: this Edition's data is
+simulated, and that belongs on the page, not buried), inclusion and
+promotion rules, then the figures themselves, then the figure generator's
+own interpretation notes.
+
+**Figures load as blobs, not `<img src>`.** The gateway's figure route is
+`auth: "gateway"` like every other archive route, and an `<img>` request
+carries no `Authorization` header — so each figure is `fetch()`ed with the
+header, turned into a blob, and set via `URL.createObjectURL`. Object URLs
+are tracked in a `Map` and revoked on close (and on `disconnectedCallback`)
+rather than left to leak for the tab's lifetime.
+
+**Rendered on white, deliberately.** matplotlib output where colour carries
+real meaning (node colour is confidence tier) gets a white "plate" behind
+it (`.psy-arch__figure-img`), not filtered or inverted to match this dark
+page — the same reasoning the policy states for the figures themselves,
+just enforced in CSS instead of the generator.
 
 ### Search
 
@@ -409,6 +444,8 @@ archive-page.ts
   ├─ openPacket(id)         GET /archive?packet=         → getPacketDetail(id)
   │                                                          ├─ GET /packets/{id}         [uncached]
   │                                                          └─ GET /packets/{id}/archetypes [uncached]
+  ├─ openEditionInfo()      GET /archive?manifest=1      → getManifest()
+  │   └─ loadFigure(name)   GET /archive/figure?name=    → getFigure(name)  [binary; blob + object URL]
   └─ runSearch()/streamSearch()
         literal:            GET /archive?query=         → search(query)
         semantic:           GET /archive/search?query=  → semanticSearch(query)

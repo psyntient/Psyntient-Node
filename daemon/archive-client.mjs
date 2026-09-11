@@ -96,6 +96,37 @@ async function request(pathname, searchParams) {
   return res.json();
 }
 
+/** Like request(), but for binary responses (figures) -- returns the raw
+ *  bytes and content-type instead of parsing JSON. */
+async function requestBinary(pathname) {
+  const url = new URL(`/api/v1${pathname}`, archiveBaseUrl());
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { Authorization: `Bearer ${readNodeToken()}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err instanceof ArchiveError) throw err;
+    throw new ArchiveError(`Could not reach the Archive at ${archiveBaseUrl()}.`, { cause: err });
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new ArchiveError(
+      "The Archive rejected this Node's credentials. Its pairing or subscription may have lapsed.",
+      { status: res.status },
+    );
+  }
+  if (!res.ok) {
+    throw new ArchiveError(`Archive returned HTTP ${res.status} for ${pathname}.`, {
+      status: res.status,
+    });
+  }
+  return {
+    contentType: res.headers.get("content-type") || "application/octet-stream",
+    buffer: Buffer.from(await res.arrayBuffer()),
+  };
+}
+
 /**
  * Edition manifest + the archetype index: the map, and the orientation call.
  *
@@ -186,6 +217,29 @@ export async function getPacketDetail(id) {
     request(`/packets/${encodeURIComponent(trimmed)}/archetypes`),
   ]);
   return { record, exemplifies };
+}
+
+/**
+ * This Edition's own account of itself: identity, schema versions,
+ * inclusion/promotion rules and counts straight from manifest.json, which
+ * generated figures currently exist, and the figure generator's own
+ * interpretation notes. A 404 here means no Edition has been published, not
+ * that this one request failed -- surfaced as such rather than a generic
+ * HTTP error.
+ */
+export async function getManifest() {
+  return request("/manifest");
+}
+
+/**
+ * One generated Edition-wide figure (network graph, confidence
+ * distribution, overlap heatmap), by name -- names come from
+ * getManifest()'s figures list, which already reflects the Archive's own
+ * allowlist, so this never has to allowlist client-side too.
+ */
+export async function getFigure(name) {
+  if (!name?.trim()) throw new ArchiveError("getFigure needs a name.");
+  return requestBinary(`/figures/${encodeURIComponent(name.trim())}`);
 }
 
 /**
@@ -400,6 +454,8 @@ export default {
   getRecord,
   getArchetypePackets,
   getPacketDetail,
+  getManifest,
+  getFigure,
   getFamily,
   batchGetArchetypes,
   cacheStats,
@@ -428,9 +484,13 @@ if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1])))
         return getPacketDetail(rest[0]);
       case "family":
         return getFamily(rest[0]);
+      case "manifest":
+        return getManifest();
+      case "figure":
+        return getFigure(rest[0]).then((f) => ({ ...f, buffer: `<${f.buffer.length} bytes>` }));
       default:
         throw new ArchiveError(
-          `Usage: archive-client.mjs map|search <q>|get <id>|packets <archetypeId>|packet <packetId>|family <id>`,
+          `Usage: archive-client.mjs map|search <q>|get <id>|packets <archetypeId>|packet <packetId>|family <id>|manifest|figure <name>`,
         );
     }
   };
