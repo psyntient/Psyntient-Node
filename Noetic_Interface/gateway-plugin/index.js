@@ -955,9 +955,11 @@ export default definePluginEntry({
     // GET                -> Edition manifest + archetype index (the map)
     // GET ?query=<text>  -> search
     // GET ?id=<id>       -> one full record
-    // GET ?family=<id>   -> the tree around this archetype: genus + species
-    //                       when one exists, otherwise the archetype itself
-    //                       + what it relates to
+    // GET ?family=<id>     -> the tree around this archetype: genus + species
+    //                         when one exists, otherwise the archetype itself
+    //                         + what it relates to
+    // GET ?evidence=<id>   -> the exemplar packets behind an archetype
+    // GET ?packet=<id>     -> one packet + what it exemplifies
     //
     // Thin pass-through to daemon/archive-client.mjs. The token lives in
     // ~/.psyntient/node.key at mode 600 and must never reach a browser, so the
@@ -974,9 +976,18 @@ export default definePluginEntry({
         const id = url.searchParams.get("id");
         const query = url.searchParams.get("query");
         const family = url.searchParams.get("family");
+        const evidence = url.searchParams.get("evidence");
+        const packet = url.searchParams.get("packet");
         try {
           if (id) return sendJson(res, 200, { ok: true, ...(await archive.getRecord(id)) });
           if (family) return sendJson(res, 200, { ok: true, ...(await archive.getFamily(family)) });
+          if (evidence) {
+            return sendJson(res, 200, {
+              ok: true,
+              ...(await archive.getArchetypePackets(evidence, { limit: 500 })),
+            });
+          }
+          if (packet) return sendJson(res, 200, { ok: true, ...(await archive.getPacketDetail(packet)) });
           if (query) return sendJson(res, 200, { ok: true, ...(await archive.search(query)) });
           return sendJson(res, 200, { ok: true, ...(await archive.getMap()) });
         } catch (err) {

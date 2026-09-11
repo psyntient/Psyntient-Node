@@ -39,13 +39,19 @@ whitepaper §2.3):
    plainly: *"Not grouped into an archetype family yet — this Edition
    defines species but no genera."*
 
-**As of the Edition this was written against (Edition 002), that's not a
-hypothetical fallback — it's the live state.** The Archive ships zero live
-genera today. Its one genus record was a smoke test the Architect
-deliberately dissolved, so every species currently shows the "no family yet"
-message. The taxonomy layer is real and wired up end to end (search, links,
-detail rendering, the Cortex hand-off prompt), just waiting on the Architect
-to actually group species into genera in a future Edition.
+**Originally written against Edition 002 at a point where that was not a
+hypothetical fallback — it was the live state**: the Archive shipped zero
+live genera, its one genus record having been a smoke test the Architect
+deliberately dissolved, so every species showed the "no family yet" message.
+That changed mid-session: `NA-0028-absorptive-attention` is now a real,
+live genus with three real species members, seeded by droplet-side Library
+interface testing (it still carries `SIMULATED_TEST_DATA: true` — see the
+family tree section below for how that's surfaced). The taxonomy layer was
+built and wired up end to end (search, links, detail rendering, the Cortex
+hand-off prompt) before any live genus existed to test it against; that
+data now exists and the code was verified against it without needing a
+change, which is exactly what "nothing hardcodes the absence" was supposed
+to buy.
 
 Nothing in the client hardcodes "there are no genera" — it reads
 `taxonomic_rank` and `parent_archetype` off whatever the Archive returns, so
@@ -180,11 +186,88 @@ flag, and the badge/banner simply will not appear for it.
 
 **Deliberately not built**: an index-level "browse every family" entry
 point (The Librarian's `#/families` list + single-family auto-redirect).
-This Edition ships zero live genera — confirmed live, not assumed, by
-batch-fetching the full index and filtering on `taxonomic_rank === "genus"`
-— so a list view would show nothing today. Worth adding once the Archive
-actually has genera to browse; until then it would be a route and a UI
-surface with zero live utility.
+At the time this was written the Edition shipped zero live genera —
+confirmed live, not assumed, by batch-fetching the full index and filtering
+on `taxonomic_rank === "genus"` — so a list view would have shown nothing.
+One live genus exists now (see above), which doesn't change the call: one
+genus is still not enough for a list view to earn its keep over the
+per-archetype pill. Worth revisiting once there are several.
+
+### Evidence and packets
+
+What used to be a bare *"N exemplars"* count with nothing behind it — a
+number a reader could not act on, and could not tell apart from an Edition
+that simply had no observation packets at all (Edition 002 sat at
+`packet_count: 0` for months; it now sits at real, non-zero counts, seeded
+by the same droplet-side work that produced the live genus above).
+
+**The Evidence section** — species records only; a genus has no exemplars
+of its own (see `loadEvidence()`'s taxonomic_rank check). Lists the
+archetype's exemplar packets as weight bars, strongest first, each showing
+the packet id, subject, and a confidence percentage. **The real/simulated
+split is stated in words above the list**, not as a badge on every row —
+*"All 12 of these recordings are simulated"* — because that is the single
+most important fact about an archetype's evidence and a reader should see
+it before reading a single packet id. Loads un-awaited right after the
+detail panel itself resolves (`open()`/`openById()` fire it without
+`await`ing), so a slow or failed evidence fetch never blocks or breaks the
+archetype page around it — a failure replaces only the section's own
+placeholder.
+
+**The packet detail view** (`openPacket()`/`renderPacketDetail()`) — click
+any evidence row and it takes over the overlay the same way the family tree
+does. Shows the participant's own first-person `report_text` as the main
+body, `context_tags` as chips, a chart per neural-data modality, and what
+the recording exemplifies (every archetype it maps to, with confidence) —
+the thing that makes an archetype checkable rather than merely stated.
+
+**The chart** (`renderModalityChart`/`renderSparkline`) is inline SVG, no
+chart library, modeled on The Library's `spark()`:
+
+- **Dispatches on the shape of the timeline, not the modality's name.**
+  EEG's `band_powers` is nested (`{timestamp, band_powers: {delta, theta,
+  ...}}`); anything else is read as a flat bag of numeric keys per point.
+  Reading the nested shape directly would draw nothing for every other
+  modality — and silently, since a titled section renders nothing for an
+  empty body. Every packet in this Edition is EEG today, so the flat-shape
+  path is unexercised against real data but not untested — verified with a
+  synthetic fixture.
+- **Scales honestly.** `band_powers` values share a real unit, so all
+  series share one axis and stay comparable. A flat bag of numeric keys is
+  in unknown units — plotting bpm against a 0-1 ratio on one axis would
+  misstate their relative size — so each series there scales to its own
+  max, and the caption says which happened.
+- **Always leaves a fallback.** No numeric timeline falls back to
+  `summary_features` as a plain list; nothing plottable at all says so
+  explicitly (*"2 channels recorded, 2 timeline points — no chart available
+  yet"*) rather than rendering silence, which is indistinguishable from
+  having no data — and absence of data is itself a claim worth stating
+  correctly.
+- **Provenance is baked into the SVG's own `<text>`**, not just page chrome
+  around it, when the packet is simulated — a chart travels by screenshot,
+  arriving somewhere with no page around it and nothing to say which
+  Edition it came from. A caveat in a banner above the figure does not
+  survive that trip; one inside the figure does.
+
+**Endpoints**: `GET /archive?evidence=<archetypeId>` →
+`getArchetypePackets()` (already existed daemon-side, unused until this);
+`GET /archive?packet=<packetId>` → `getPacketDetail()`, new — goes straight
+to `/packets/{id}` + `/packets/{id}/archetypes` in parallel rather than
+through `getRecord()`'s archetype-then-packet fallback, since a caller here
+already knows the id is a packet.
+
+**Deliberately not built**: Edition-wide generated figures (the archetype
+network graph, confidence distribution, overlap heatmap The Library serves
+from `<edition>/visualizations/`). Those are matplotlib output generated
+once per Edition and read from the droplet's own local filesystem by The
+Library's own proxy — `archive.psyntient.io`'s public API, which is the
+only thing this Node talks to, has no endpoint for them (`/api/v1/manifest`,
+`/api/v1/figures`, `/api/v1/visualizations`, `/api/v1/edition` all 404,
+checked live). Reachable from here only if that API is extended to expose
+them; not something to build by reaching into droplet-local files, which
+this Node's architecture deliberately never does (see `PSYNTIENT_ARCHIVE_URL`
+and the traverse-never-mirror design note at the top of
+`archive-client.mjs`).
 
 ### Search
 
@@ -321,7 +404,11 @@ archive-page.ts
   ├─ openFamily(id)         GET /archive?family=        → getFamily(id)
   │                                                          ├─ getRecord(id)            [cache-aware]
   │                                                          ├─ getRecord(genusId)       [cache-aware, skipped if id IS the genus]
-  │                                                          └─ batchGetArchetypes(members) [cache-aware]
+  │                                                          └─ batchGetArchetypes(members or related ids) [cache-aware]
+  ├─ loadEvidence(id)       GET /archive?evidence=       → getArchetypePackets(id)
+  ├─ openPacket(id)         GET /archive?packet=         → getPacketDetail(id)
+  │                                                          ├─ GET /packets/{id}         [uncached]
+  │                                                          └─ GET /packets/{id}/archetypes [uncached]
   └─ runSearch()/streamSearch()
         literal:            GET /archive?query=         → search(query)
         semantic:           GET /archive/search?query=  → semanticSearch(query)

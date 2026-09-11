@@ -165,9 +165,27 @@ export async function getRecord(id) {
   return { kind: "packet", record: await request(`/packets/${encodeURIComponent(id)}`) };
 }
 
-/** Exemplar packets for an archetype. */
+/** Exemplar packets for an archetype -- the evidence list. */
 export async function getArchetypePackets(archetypeId, { limit, offset } = {}) {
   return request(`/archetypes/${encodeURIComponent(archetypeId)}/packets`, { limit, offset });
+}
+
+/**
+ * One packet plus what it exemplifies, for the packet detail view.
+ *
+ * Goes straight to /packets/{id} rather than through getRecord()'s
+ * archetype-then-packet fallback -- callers of this function already know
+ * the id is a packet (it came from an evidence list), so the fallback's
+ * wasted archetype lookup has no reason to run here.
+ */
+export async function getPacketDetail(id) {
+  if (!id?.trim()) throw new ArchiveError("getPacketDetail needs an id.");
+  const trimmed = id.trim();
+  const [record, exemplifies] = await Promise.all([
+    request(`/packets/${encodeURIComponent(trimmed)}`),
+    request(`/packets/${encodeURIComponent(trimmed)}/archetypes`),
+  ]);
+  return { record, exemplifies };
 }
 
 /**
@@ -381,6 +399,7 @@ export default {
   search,
   getRecord,
   getArchetypePackets,
+  getPacketDetail,
   getFamily,
   batchGetArchetypes,
   cacheStats,
@@ -405,11 +424,13 @@ if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1])))
         return getRecord(rest[0]);
       case "packets":
         return getArchetypePackets(rest[0]);
+      case "packet":
+        return getPacketDetail(rest[0]);
       case "family":
         return getFamily(rest[0]);
       default:
         throw new ArchiveError(
-          `Usage: archive-client.mjs map|search <q>|get <id>|packets <archetypeId>|family <id>`,
+          `Usage: archive-client.mjs map|search <q>|get <id>|packets <archetypeId>|packet <packetId>|family <id>`,
         );
     }
   };
