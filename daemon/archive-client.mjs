@@ -171,67 +171,76 @@ export async function getArchetypePackets(archetypeId, { limit, offset } = {}) {
 }
 
 /**
- * The tree around an archetype: its genus and every sibling species.
+ * The tree around an archetype -- always shows something, never a dead end.
  *
- * Resolution order: look up `id`; take `parent_archetype` if present,
- * otherwise the record's own id if it IS a genus. Neither -> genus: null,
- * not an error -- "this archetype has no family" is an answer, not a
- * failure, same as the rest of this client's error posture.
+ * When the archetype has a genus (directly, or IS one via taxonomic_rank),
+ * the tree is genus-on-top, its `members` beneath. When it does not --
+ * true for every archetype in this Edition today, and also the graceful
+ * landing spot if a genus a species points at can't be found (renamed or
+ * merged between Editions) -- the tree falls back to the archetype ITSELF
+ * on top, with whatever it `related` to beneath it. There is always
+ * something to show: every archetype at least has itself, and most carry
+ * `related` edges even with no formal genus.
  *
- * Built downward from the genus's own `members` list. A genus and its
- * species store their side of this edge independently and nothing
- * reconciles them, so a member whose own parent_archetype disagrees (or is
- * missing) still shows up here -- the genus's members is what the tree
- * shows.
+ * Built downward from the genus's own `members` list, not a species'
+ * `parent_archetype` back-link. A genus and its species store their side of
+ * that edge independently and nothing reconciles them, so a member whose
+ * own parent_archetype disagrees (or is missing) still shows up here.
  */
+/**
+ * A record's taxonomy fields (taxonomic_rank, parent_archetype, members,
+ * related, ...) live inside `archetype_json`, not at the top level -- the
+ * top level is the flat card-summary shape (id/slug/name/description/
+ * confidence_tier/n_exemplars) shared with getMap()'s index and
+ * batchGetArchetypes()'s results. Every caller that needs taxonomy detail
+ * unwraps through this, same as the browser side already does for the
+ * single-record detail panel.
+ */
+function taxonomyOf(record) {
+  return record.archetype_json && typeof record.archetype_json === "object"
+    ? record.archetype_json
+    : record;
+}
+
 export async function getFamily(id) {
   if (!id?.trim()) throw new ArchiveError("getFamily needs an id.");
   const own = await getRecord(id.trim());
   if (own.kind !== "archetype") {
-    return {
-      of: id,
-      genus: null,
-      species: [],
-      note: "This is a packet, not an archetype -- it has no place in the taxonomy.",
-    };
+    return { of: id, hub: null, hubIsGenus: false, row: [] };
   }
   const raw = own.record;
-  const genusId =
-    raw.taxonomic_rank === "genus"
-      ? raw.id
-      : typeof raw.parent_archetype === "string" && raw.parent_archetype
-        ? raw.parent_archetype
-        : null;
-  if (!genusId) {
-    return { of: id, genus: null, species: [], note: "This archetype does not belong to a genus." };
-  }
+  const meta = taxonomyOf(raw);
+  const isGenus = meta.taxonomic_rank === "genus";
+  const genusId = isGenus
+    ? raw.id
+    : typeof meta.parent_archetype === "string" && meta.parent_archetype
+      ? meta.parent_archetype
+      : null;
 
-  let genusRaw = raw;
-  if (genusId !== raw.id) {
-    try {
-      genusRaw = (await getRecord(genusId)).record;
-    } catch (err) {
-      // A genus a species points at can be missing (renamed/merged between
-      // Editions) -- an honest "not found" here beats a stack trace, same
-      // reasoning as the no-genus case above.
-      if (err instanceof ArchiveError && err.status === 404) {
-        return {
-          of: id,
-          genus: null,
-          species: [],
-          note: `This archetype's genus (${genusId}) could not be found in the current Edition.`,
-        };
+  if (genusId) {
+    let genusRaw = raw;
+    if (genusId !== raw.id) {
+      try {
+        genusRaw = (await getRecord(genusId)).record;
+      } catch (err) {
+        if (!(err instanceof ArchiveError && err.status === 404)) throw err;
+        genusRaw = null; // falls through to the self + related view below
       }
-      throw err;
+    }
+    if (genusRaw) {
+      const genusMeta = taxonomyOf(genusRaw);
+      const memberIds = Array.isArray(genusMeta.members)
+        ? genusMeta.members.filter((m) => typeof m === "string")
+        : [];
+      const row = await batchGetArchetypes(memberIds);
+      return { of: id, hub: genusRaw, hubIsGenus: true, row };
     }
   }
 
-  const memberIds = Array.isArray(genusRaw.members)
-    ? genusRaw.members.filter((m) => typeof m === "string")
-    : [];
-  const species = await batchGetArchetypes(memberIds);
-
-  return { of: id, genus: genusRaw, species };
+  const related = meta.related && typeof meta.related === "object" ? meta.related : {};
+  const relatedIds = Object.keys(related).filter((rid) => typeof related[rid] === "string");
+  const row = await batchGetArchetypes(relatedIds);
+  return { of: id, hub: raw, hubIsGenus: false, row, relatedWhy: related };
 }
 
 

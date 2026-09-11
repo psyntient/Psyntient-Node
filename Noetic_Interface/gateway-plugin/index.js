@@ -955,7 +955,9 @@ export default definePluginEntry({
     // GET                -> Edition manifest + archetype index (the map)
     // GET ?query=<text>  -> search
     // GET ?id=<id>       -> one full record
-    // GET ?family=<id>   -> the genus + sibling species around this archetype
+    // GET ?family=<id>   -> the tree around this archetype: genus + species
+    //                       when one exists, otherwise the archetype itself
+    //                       + what it relates to
     //
     // Thin pass-through to daemon/archive-client.mjs. The token lives in
     // ~/.psyntient/node.key at mode 600 and must never reach a browser, so the
