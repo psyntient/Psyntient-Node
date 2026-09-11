@@ -955,6 +955,7 @@ export default definePluginEntry({
     // GET                -> Edition manifest + archetype index (the map)
     // GET ?query=<text>  -> search
     // GET ?id=<id>       -> one full record
+    // GET ?family=<id>   -> the genus + sibling species around this archetype
     //
     // Thin pass-through to daemon/archive-client.mjs. The token lives in
     // ~/.psyntient/node.key at mode 600 and must never reach a browser, so the
@@ -970,8 +971,10 @@ export default definePluginEntry({
         const url = new URL(req.url, "http://localhost");
         const id = url.searchParams.get("id");
         const query = url.searchParams.get("query");
+        const family = url.searchParams.get("family");
         try {
           if (id) return sendJson(res, 200, { ok: true, ...(await archive.getRecord(id)) });
+          if (family) return sendJson(res, 200, { ok: true, ...(await archive.getFamily(family)) });
           if (query) return sendJson(res, 200, { ok: true, ...(await archive.search(query)) });
           return sendJson(res, 200, { ok: true, ...(await archive.getMap()) });
         } catch (err) {

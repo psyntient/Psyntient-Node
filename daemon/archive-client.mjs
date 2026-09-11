@@ -170,6 +170,70 @@ export async function getArchetypePackets(archetypeId, { limit, offset } = {}) {
   return request(`/archetypes/${encodeURIComponent(archetypeId)}/packets`, { limit, offset });
 }
 
+/**
+ * The tree around an archetype: its genus and every sibling species.
+ *
+ * Resolution order: look up `id`; take `parent_archetype` if present,
+ * otherwise the record's own id if it IS a genus. Neither -> genus: null,
+ * not an error -- "this archetype has no family" is an answer, not a
+ * failure, same as the rest of this client's error posture.
+ *
+ * Built downward from the genus's own `members` list. A genus and its
+ * species store their side of this edge independently and nothing
+ * reconciles them, so a member whose own parent_archetype disagrees (or is
+ * missing) still shows up here -- the genus's members is what the tree
+ * shows.
+ */
+export async function getFamily(id) {
+  if (!id?.trim()) throw new ArchiveError("getFamily needs an id.");
+  const own = await getRecord(id.trim());
+  if (own.kind !== "archetype") {
+    return {
+      of: id,
+      genus: null,
+      species: [],
+      note: "This is a packet, not an archetype -- it has no place in the taxonomy.",
+    };
+  }
+  const raw = own.record;
+  const genusId =
+    raw.taxonomic_rank === "genus"
+      ? raw.id
+      : typeof raw.parent_archetype === "string" && raw.parent_archetype
+        ? raw.parent_archetype
+        : null;
+  if (!genusId) {
+    return { of: id, genus: null, species: [], note: "This archetype does not belong to a genus." };
+  }
+
+  let genusRaw = raw;
+  if (genusId !== raw.id) {
+    try {
+      genusRaw = (await getRecord(genusId)).record;
+    } catch (err) {
+      // A genus a species points at can be missing (renamed/merged between
+      // Editions) -- an honest "not found" here beats a stack trace, same
+      // reasoning as the no-genus case above.
+      if (err instanceof ArchiveError && err.status === 404) {
+        return {
+          of: id,
+          genus: null,
+          species: [],
+          note: `This archetype's genus (${genusId}) could not be found in the current Edition.`,
+        };
+      }
+      throw err;
+    }
+  }
+
+  const memberIds = Array.isArray(genusRaw.members)
+    ? genusRaw.members.filter((m) => typeof m === "string")
+    : [];
+  const species = await batchGetArchetypes(memberIds);
+
+  return { of: id, genus: genusRaw, species };
+}
+
 
 // --- record cache ---------------------------------------------------------
 //
@@ -308,6 +372,7 @@ export default {
   search,
   getRecord,
   getArchetypePackets,
+  getFamily,
   batchGetArchetypes,
   cacheStats,
   clearCache,
@@ -331,8 +396,12 @@ if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1])))
         return getRecord(rest[0]);
       case "packets":
         return getArchetypePackets(rest[0]);
+      case "family":
+        return getFamily(rest[0]);
       default:
-        throw new ArchiveError(`Usage: archive-client.mjs map|search <q>|get <id>|packets <archetypeId>`);
+        throw new ArchiveError(
+          `Usage: archive-client.mjs map|search <q>|get <id>|packets <archetypeId>|family <id>`,
+        );
     }
   };
   run()

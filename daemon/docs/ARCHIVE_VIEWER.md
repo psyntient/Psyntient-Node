@@ -115,6 +115,77 @@ Every section uses `renderSection()`, which renders nothing at all when the
 underlying field is absent or empty — no empty headers for data the Archive
 didn't supply.
 
+### The family tree
+
+The Family chip and the genus member list above are enough to *link* to one
+level of the taxonomy, but not enough to *see* it. The family tree is a
+dedicated three-tier view — genus, its species one rank beneath it, and
+under each species the archetypes it relates to — reached from a pill inside
+the detail panel:
+
+| the open archetype is | pill reads             | opens the tree for |
+| ---------------------- | ----------------------- | ------------------- |
+| a species with a genus  | `▲ in {genus}`          | the species' own id |
+| a genus                 | `▼ {n} species`         | the genus' own id   |
+| neither                 | nothing (unchanged — see above) | — |
+
+The pill always passes the *currently open* archetype's own id, never the
+genus's — `getFamily(id)` (`daemon/archive-client.mjs`) resolves upward on
+its own (`parent_archetype` if present, otherwise the id itself when it is
+already a genus), the same way `GET /library/api/family/<id>` does in The
+Librarian, the droplet-side implementation this view is modeled on. A
+species with no genus, or a genus whose id doesn't resolve to a real record
+(renamed/merged between Editions), gets a 200 with an explanation — `{genus:
+null, species: [], note: "..."}` — never an error page. Reached over the
+same `/archive` gateway route as everything else, multiplexed on a new
+`?family=<id>` query param alongside the existing `?id=`/`?query=`.
+
+**Rendering**: `.psy-arch__tree-node` cards reuse the same gradient +
+`--elevate-1/2` treatment as the grid cards; the genus card is centered and
+wider, and the card matching the id the tree was opened about gets a gold
+`--psy-gold` outline (`.psy-arch__tree-node--you`) so the reader can always
+tell where they are. Connectors between tiers are CSS borders on thin spacer
+elements, not SVG, so they inherit `--border` and survive a reflow; the
+horizontal bar's inset uses `--n` (the species count) to correct for the
+gaps between columns not being part of any column:
+
+```css
+.psy-arch__tree-bar {
+  margin: 0 calc((100% - (var(--n) - 1) * 0.85rem) / (2 * var(--n)));
+}
+```
+
+Below 760px the row collapses to a single column and the connectors hide —
+a horizontal bar across a vertical stack means nothing. Each species card's
+own `related` edges render as chips beneath it; an edge whose target id
+isn't in the currently-loaded index renders as plain text instead of a
+clickable chip, checked against the already-loaded `archetypes` list rather
+than an extra fetch.
+
+Clicking any tree card (or a related chip) opens that record's regular
+single-archetype detail panel — `open()`/`openById()` always clear the tree
+state first, so the two views never end up stacked. There is no separate
+in-tree "re-centering" interaction; getting back to the tree from there
+means clicking the pill again, which keeps the tree reusing the exact same
+detail-fetch code path as the rest of the page rather than a second one.
+
+**Simulated-data provenance**: every genus in this Edition is seeded test
+data (see below) — a surface built for citation that displayed a dissolved
+smoke test as real taxonomy would be worse than no taxonomy view at all. The
+tree checks the genus record's own `SIMULATED_TEST_DATA` field and, when
+true, shows a `Test data` badge on the genus card plus a banner quoting the
+record's own `note` field and saying plainly not to cite the grouping.
+Nothing is hardcoded: a real genus the Architect derives later carries no
+flag, and the badge/banner simply will not appear for it.
+
+**Deliberately not built**: an index-level "browse every family" entry
+point (The Librarian's `#/families` list + single-family auto-redirect).
+This Edition ships zero live genera — confirmed live, not assumed, by
+batch-fetching the full index and filtering on `taxonomic_rank === "genus"`
+— so a list view would show nothing today. Worth adding once the Archive
+actually has genera to browse; until then it would be a route and a UI
+surface with zero live utility.
+
 ### Search
 
 Two distinct paths, both hitting the same grid:
@@ -247,6 +318,10 @@ archive-page.ts
   ├─ load()               GET /archive                → getMap()
   ├─ open(a)               GET /archive?id=            → getRecord(id)
   ├─ openById(id)           (same, for a related/family/member link)
+  ├─ openFamily(id)         GET /archive?family=        → getFamily(id)
+  │                                                          ├─ getRecord(id)            [cache-aware]
+  │                                                          ├─ getRecord(genusId)       [cache-aware, skipped if id IS the genus]
+  │                                                          └─ batchGetArchetypes(members) [cache-aware]
   └─ runSearch()/streamSearch()
         literal:            GET /archive?query=         → search(query)
         semantic:           GET /archive/search?query=  → semanticSearch(query)
