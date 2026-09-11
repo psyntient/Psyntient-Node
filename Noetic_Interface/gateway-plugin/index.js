@@ -1043,6 +1043,40 @@ export default definePluginEntry({
       }),
     });
 
+    // --- Archive recently-browsed history -----------------------------------
+    // GET                      -> { entries: [{id, lastSeen, views}] }, newest first
+    // POST {action:"record",id} -> records one archetype's own page being
+    //                              opened, then returns the updated list
+    // POST {action:"clear"}     -> empties the list
+    //
+    // Purely local -- daemon/archive-history.mjs never calls the Archive.
+    // A separate route from /archive rather than another query param on it:
+    // /archive is a pass-through to archive.psyntient.io, and this never
+    // touches the network at all.
+    api.registerHttpRoute({
+      path: "/__openclaw__/psyntient/archive/history",
+      auth: "gateway",
+      handler: route(async (req, res) => {
+        const history = await daemonModule("archive-history.mjs");
+        if (req.method === "GET") {
+          return sendJson(res, 200, { ok: true, ...history.listHistory() });
+        }
+        if (req.method === "POST") {
+          const body = await readJsonBody(req);
+          if (body.action === "record") {
+            const id = typeof body.id === "string" ? body.id : "";
+            if (!id.trim()) return sendJson(res, 400, { ok: false, error: "id required" });
+            return sendJson(res, 200, { ok: true, ...history.recordView(id) });
+          }
+          if (body.action === "clear") {
+            return sendJson(res, 200, { ok: true, ...history.clearHistory() });
+          }
+          return sendJson(res, 400, { ok: false, error: "unknown action" });
+        }
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }),
+    });
+
     // --- Archive sync -----------------------------------------------------
     // GET  -> { autoSyncAll, projects: [...], active }
     // POST -> { action:"set-global", enabled }

@@ -304,6 +304,81 @@ it (`.psy-arch__figure-img`), not filtered or inverted to match this dark
 page — the same reasoning the policy states for the figures themselves,
 just enforced in CSS instead of the generator.
 
+### Recently browsed
+
+A `Recently browsed (N)` chip, shown only when the list is non-empty. Clicking
+it expands a strip of pills — archetype name + relative time ("just now" /
+"15 min ago" / "1 hr ago" / "yesterday" / "4 days ago"), newest first — plus a
+retention/masking note and a "Clear this list" button. Open/closed state
+persists in `localStorage` (`psy-arch-history-open`), a per-browser
+convenience, separate from the list itself.
+
+Copies the behaviour of the same feature in The Library (the droplet-side
+project this Node reads Archive material from), not its layout — a docked
+side panel would be a much larger structural change to a page with no
+sidebar concept anywhere else in it, for behaviour this chip+strip pattern
+already delivers.
+
+**What gets recorded, and when.** An archetype's own page being opened —
+never a card in the grid, a search result, a packet, or a family-tree visit.
+`open()` and `openById()` are the only two places that open an archetype's
+own detail panel (a card click, a related link, a family-tree node, an
+"exemplifies" link all funnel through one of these two), and both gate the
+record on the `/archive?id=` response's own `kind === "archetype"` — a
+packet id never records. Upsert, not append: a revisit moves the entry to
+the top and increments its view count rather than adding a second row.
+
+**Local storage — `daemon/archive-history.mjs`, its own file.** Deliberately
+*not* folded into `archive-client.mjs`'s `RECORD_CACHE`: that cache is
+meant to disappear (Edition change, TTL, a gateway restart), while a
+browsing history must survive all three. This was a real trap on the
+Library's own side of this feature, called out explicitly in the brief this
+was built from — the obvious home was the cache, and flushing a cache must
+never delete someone's history. Lives at
+`~/.psyntient/archive-history.json` (`psyntientHome()`), same reasoning as
+`node.key`/`providers.json`: Node *state*, not installed code, so the
+updater — which only ever replaces the engine tree — never touches it.
+Capped at 60 entries (matches the Library's own cap), oldest dropped first.
+**Deliberately no local expiry.** Retention (30 days) is the server's, once
+syncing exists; a local clock disagreeing with the server's would show the
+reader two different answers to "is this still on my list." Today this is
+just a bounded cache with no time-based drop — entries only leave it by
+falling off the cap or an explicit clear.
+
+**Route — a sibling of `/archive`, not a query param on it**:
+`GET /__openclaw__/psyntient/archive/history` returns
+`{ entries: [{id, lastSeen, views}] }`; `POST {action:"record", id}` records
+one view and returns the updated list; `POST {action:"clear"}` empties it.
+Every other archive route is a pass-through to `archive.psyntient.io`
+(`?id=`, `?family=`, etc.) — this one never touches the network at all,
+which is reason enough to keep it off that route rather than multiplexing
+on yet another query param.
+
+**Not in the current Edition.** A pill whose id isn't in the currently-
+loaded archetype index renders greyed and non-clickable, with a "No longer
+in this Edition" title — the same idiom `renderTreeRowItem()` already uses
+for a stale cross-reference, and the same `in_edition: false` concept the
+sync contract (below) defines server-side. A reader looking for what they
+read last month should be told it's gone, not find it silently missing.
+
+**Syncing is blocked, on purpose, and not built.** The Library exposes
+`GET`/`POST /library/sync/history` for exactly this — one list per
+Psyntient account, shared across every surface that reads the Archive — but
+it requires a verified user session, and this Node never holds one
+(`AUTH_FLOW.md`: "The Node never receives the user's Supabase JWT,
+password, or a service-role key"). The Node knows who it acts for
+(`interface-session-exchange` returns `user_id`/`user_email`), but that
+exchange consumes a one-time, node-bound token — an attestation this Node
+can act on locally, never a credential it can replay to a third party. The
+shortcut this must never take: sending `Authorization: Bearer <node_token>`
+together with a `user_id` in the body, which would let any paired Node read
+any researcher's history by naming someone else's id. What unblocks it:
+psyntient.io adding `user_id` to `POST /api/public/nodes/verify-token`'s
+response (tracked as `LOVABLE-verify-token-user-id.md`, droplet-side, not in
+this repo). Until that ships, recording stays purely local; nothing else
+about this feature changes when it does — the local half was built to not
+need rework, only an additional sync step.
+
 ### Search
 
 Two distinct paths, both hitting the same grid:
@@ -446,6 +521,9 @@ archive-page.ts
   │                                                          └─ GET /packets/{id}/archetypes [uncached]
   ├─ openEditionInfo()      GET /archive?manifest=1      → getManifest()
   │   └─ loadFigure(name)   GET /archive/figure?name=    → getFigure(name)  [binary; blob + object URL]
+  ├─ loadHistory()          GET /archive/history         → archive-history.mjs listHistory()   [local only, no Archive call]
+  ├─ recordArchetypeView()  POST /archive/history        → archive-history.mjs recordView(id)  [fired from open()/openById() on kind==="archetype"]
+  ├─ clearHistory()         POST /archive/history        → archive-history.mjs clearHistory()
   └─ runSearch()/streamSearch()
         literal:            GET /archive?query=         → search(query)
         semantic:           GET /archive/search?query=  → semanticSearch(query)
