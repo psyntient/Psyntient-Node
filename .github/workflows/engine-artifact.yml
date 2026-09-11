@@ -11,6 +11,19 @@
 # (@earendil-works/pi-tui) ships prebuilds for darwin-x64, darwin-arm64,
 # win32-x64 and win32-arm64 together. The only per-platform component is the
 # Node runtime itself, which the installer already downloads from nodejs.org.
+#
+# WHY THIS ALSO RUNS ON A SCHEDULE (added after a real failure, not
+# speculatively)
+# This workflow used to be workflow_dispatch-only. daemon/updater.mjs's
+# check() reports an update as soon as the fork's psyntient branch moves
+# ahead of a Node's checkout -- a plain git comparison, independent of
+# whether this workflow has ever been run for that commit. Nothing enforced
+# "someone remembers to dispatch a build" as a precondition, so a commit
+# pushed to the fork with no accompanying manual dispatch left every Node,
+# including ones this session never touched, permanently seeing "update
+# available" and then 404ing on every apply(): check() was honest, and
+# apply() had nothing to download, forever, for that commit. The schedule
+# below closes that gap without relying on anyone remembering anything.
 name: Engine artifact
 
 on:
@@ -24,12 +37,58 @@ on:
         description: Publish a release rather than only an artifact
         type: boolean
         default: false
+  schedule:
+    # Every 15 minutes, matching AUTH_FLOW.md's own "keep revocation latency
+    # low" precedent elsewhere in this product -- an unpublished commit is a
+    # broken updater for every Node until it is caught. The check job below
+    # exits in well under a minute when nothing changed, so this costs
+    # nothing on the common tick.
+    - cron: "*/15 * * * *"
 
 permissions:
   contents: write
 
 jobs:
+  # Resolves what a schedule tick would build and skips the (otherwise ~20
+  # minute) build job entirely when a release already exists for that sha.
+  # A manual workflow_dispatch always proceeds regardless of this job's
+  # answer -- that path is for deliberately rebuilding or testing a specific
+  # ref, and short-circuiting it would be a real regression, not a saving.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      short: ${{ steps.resolve.outputs.short }}
+      needed: ${{ steps.resolve.outputs.needed }}
+    steps:
+      - name: Resolve the engine ref and whether it needs building
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.engine_ref || 'psyntient' }}"
+          SHA="$(git ls-remote https://github.com/psyntient/Open-Claw-Forked.git "$REF" | cut -f1)"
+          if [ -z "$SHA" ]; then
+            # A branch/tag name didn't resolve via ls-remote (e.g. engine_ref
+            # was already a sha). Trust it as-is; the fork checkout step in
+            # the build job will fail loudly if it truly doesn't exist.
+            SHA="$REF"
+          fi
+          SHORT="${SHA:0:8}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
+          if gh release view "engine-$SHA" --repo psyntient/Psyntient-Node >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "engine-$SHA already published; nothing to do"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "engine-$SHA not published yet"
+          fi
+
   build:
+    needs: check
+    if: github.event_name != 'schedule' || needs.check.outputs.needed == 'true'
     runs-on: ubuntu-latest
     # The build peaks near 9 GB and takes ~20 minutes on 4 cores. GitHub's
     # standard runner has 16 GB, so it fits with room; an 8 GB developer laptop
@@ -44,7 +103,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: psyntient/Open-Claw-Forked
-          ref: ${{ inputs.engine_ref || 'psyntient' }}
+          # The exact sha check resolved, not a re-read of the branch tip --
+          # the branch can move between the check job and this checkout, and
+          # both jobs must agree on what is actually being built and tagged.
+          ref: ${{ needs.check.outputs.sha }}
           path: engine
           # Shallow: the artifact is built from a single commit's tree, and the
           # fork shares 2 GB of upstream history nobody here needs.
@@ -124,7 +186,11 @@ jobs:
           retention-days: 30
 
       - name: Publish release
-        if: ${{ inputs.publish }}
+        # A manual dispatch publishes only when asked (inputs.publish); a
+        # schedule tick only ever runs because check found a real gap (see
+        # the build job's own `if:`), so it always publishes -- there is no
+        # "build but don't publish" case for an unattended run to opt into.
+        if: ${{ inputs.publish || github.event_name == 'schedule' }}
         env:
           GH_TOKEN: ${{ github.token }}
         # Tagged by ENGINE sha, not by this repo's: the artifact is the engine's
