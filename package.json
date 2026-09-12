@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "description": "Dependencies for daemon/*.mjs — not a build target, no scripts.",
+  "scripts": {
+    "test": "node --test daemon/*.test.mjs"
+  },
   "dependencies": {
     "@fugood/whisper.node": "^1.1.2"
   }

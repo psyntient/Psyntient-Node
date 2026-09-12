@@ -150,6 +150,20 @@ export async function submitPacket(packet) {
   return { ok: true, submissionId: body.submission_id };
 }
 
+/**
+ * Where one submission currently stands.
+ *
+ * Ingestion is asynchronous: POST /ingest/packets always answers 202 and
+ * queues the packet, so a rejection is never visible at submission time --
+ * the Architect's triage (ingest_queue.py) reviews the queue on its own
+ * schedule and writes a verdict alongside the submission afterward. This is
+ * the only place that verdict becomes visible to the Node, so `code` and
+ * `message` -- the Architect's own stable, branch-on-this rejection code
+ * and its human-readable explanation (CONSENT_MISSING, PROVENANCE_MISSING,
+ * HELD_OUT_PACKET, ...) -- are surfaced here rather than silently dropped.
+ * `status: "pending"` with no code is a normal, expected result, not a
+ * bug: it means triage has not reached this packet yet.
+ */
 export async function checkSubmissionStatus(submissionId) {
   let res;
   try {
@@ -164,7 +178,42 @@ export async function checkSubmissionStatus(submissionId) {
   if (!res.ok) {
     return { ok: false, status: res.status, error: body?.detail || `HTTP ${res.status}` };
   }
-  return { ok: true, status: body.status };
+  return {
+    ok: true,
+    status: body.status,
+    code: body.code ?? null,
+    message: body.message ?? null,
+    missingFields: body.missing_fields ?? null,
+  };
+}
+
+/**
+ * Per-packet outcomes for everything a project has ever submitted -- not a
+ * bare "N of M accepted" count. During a validation campaign, "38 of 40
+ * accepted" with no indication of which two is not usable; this answers
+ * "which ones, and why" by polling GET /ingest/status once per
+ * previously-submitted packet (from .sync-log.json) and returning each
+ * one's current status plus the Architect's code/message when triage has
+ * reached it. A "pending" outcome is expected, not an error -- see
+ * checkSubmissionStatus's own note on why ingestion is asynchronous.
+ */
+export async function getSubmissionOutcomes(projectId) {
+  assertSafeId(projectId, "projectId");
+  const stagingDir = path.join(vaultProjectDir(projectId), "Syncable_Data_Files");
+  const log = readSyncLog(stagingDir);
+  const outcomes = [];
+  for (const [filename, record] of Object.entries(log)) {
+    const result = await checkSubmissionStatus(record.submissionId);
+    outcomes.push({
+      filename,
+      submissionId: record.submissionId,
+      submittedAt: record.submittedAt,
+      ...(result.ok
+        ? { status: result.status, code: result.code, message: result.message, missingFields: result.missingFields }
+        : { status: "unknown", error: result.error }),
+    });
+  }
+  return { ok: true, projectId, outcomes };
 }
 
 function readSyncLog(stagingDir) {
@@ -225,4 +274,38 @@ export async function syncProjectToArchive(projectId) {
 
   writeSyncLog(stagingDir, log);
   return { ok: true, projectId, submitted, errors, alreadySubmitted };
+}
+
+// --- CLI ------------------------------------------------------------------
+// Mirrors archive-client.mjs/archive-history.mjs: every function reachable
+// from the shell, so submission and status-checking are testable against
+// the real droplet without a running agent or Interface.
+if (process.argv[1] && import.meta.url.endsWith(path.basename(process.argv[1]))) {
+  const [, , cmd, ...rest] = process.argv;
+  const run = async () => {
+    switch (cmd) {
+      case "check":
+        return checkArchiveConnection();
+      case "submit": {
+        const packet = JSON.parse(fs.readFileSync(rest[0], "utf8"));
+        return submitPacket(packet);
+      }
+      case "status":
+        return checkSubmissionStatus(rest[0]);
+      case "sync":
+        return syncProjectToArchive(rest[0]);
+      case "outcomes":
+        return getSubmissionOutcomes(rest[0]);
+      default:
+        throw new Error(
+          "Usage: archive-sync.mjs check|submit <packetFile>|status <submissionId>|sync <projectId>|outcomes <projectId>",
+        );
+    }
+  };
+  run()
+    .then((out) => console.log(JSON.stringify(out, null, 2)))
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err);
+      process.exit(1);
+    });
 }
