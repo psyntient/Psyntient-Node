@@ -131,13 +131,30 @@ export async function checkArchiveConnection() {
 
 /** Submits ONE packet. Does not touch the filesystem -- callers decide what
  *  to do with the result. */
-export async function submitPacket(packet) {
+/**
+ * Submit one packet, naming the project it came from.
+ *
+ * The project travels with the submission because the Archive needs it for two
+ * things this Node cannot do afterwards: linking an exemplar in the Library
+ * back to the published project it came from, and finding everything a
+ * withdrawal has to reach -- a request arrives naming a person within a study,
+ * not a filename.
+ *
+ * The ACCOUNT is deliberately not sent. The Archive derives it from this
+ * Node's token by asking psyntient.io, the same way it derives node_id. An
+ * account id in the body would be a claim, and a claim would let any paired
+ * Node attribute data to somebody else.
+ *
+ * An older Archive that does not know the field ignores it, so this is safe to
+ * ship before the droplet half is deployed.
+ */
+export async function submitPacket(packet, projectId) {
   let res;
   try {
     res = await fetch(`${ARCHIVE_BASE_URL}/ingest/packets`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ packet }),
+      body: JSON.stringify(projectId ? { packet, project_id: projectId } : { packet }),
       signal: AbortSignal.timeout(20000),
     });
   } catch (err) {
@@ -262,7 +279,7 @@ export async function syncProjectToArchive(projectId) {
       errors.push({ filename: entry.name, error: `unreadable: ${err.message}` });
       continue;
     }
-    const result = await submitPacket(packet);
+    const result = await submitPacket(packet, projectId);
     if (!result.ok) {
       errors.push({ filename: entry.name, error: result.error });
       continue;
