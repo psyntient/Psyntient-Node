@@ -36,7 +36,13 @@ import { createHash } from "node:crypto";
 import { vaultProjectDir, assertSafeId } from "./working-memory.mjs";
 import { readNodeKey } from "./pairing.mjs";
 
-const ARCHIVE_BASE_URL = "https://archive.psyntient.io/api/v1";
+// Overridable so the upload path can be exercised against a local stub.
+// Streaming a file body out of Node's fetch has enough sharp edges --
+// duplex, content-length, a ReadStream that must not be buffered -- that
+// "it compiles" is not evidence it works, and the alternative way to find
+// out is depositing into somebody's real repository.
+const ARCHIVE_BASE_URL =
+  process.env.PSYNTIENT_ARCHIVE_URL || "https://archive.psyntient.io/api/v1";
 const PROJECT_JSON = ".project.json";
 
 // Where a deposit's files live. Deliberately not notes/ or analyses/: those
@@ -188,11 +194,19 @@ async function uploadOne(projectId, file) {
  * Never throws for one bad file. A single unreadable recording must not stop
  * the other two hundred, so failures are collected and reported.
  */
-export async function syncProjectToRepo(projectId, { force = false } = {}) {
+export async function syncProjectToRepo(
+  projectId,
+  { force = false, files = null } = {},
+) {
   assertSafeId(projectId);
   if (!force && !repoSyncEnabled(projectId)) {
     return { projectId, enabled: false, uploaded: [], skipped: [], failed: [] };
   }
+  // Gather, then decide, then act. `files` exists so the diff-and-upload half
+  // can be exercised without a Vault on disk -- what is worth testing here is
+  // that the right bytes move exactly once, and tying that to a real Vault
+  // root would mean the only way to test it is to have one.
+  const local = files ?? depositableFiles(projectId);
 
   let remote;
   try {
@@ -207,12 +221,22 @@ export async function syncProjectToRepo(projectId, { force = false } = {}) {
       failed: [],
     };
   }
-  const have = new Set(remote.map((r) => r.sha256).filter(Boolean));
+  // KEYED ON NAME AND DIGEST, matching what the Repo treats as a duplicate.
+  // Digest alone was written first and is wrong in the same way it was wrong
+  // there: identical bytes under two names is an ordinary shape -- headers,
+  // placeholders, a template exported per subject -- and skipping the second
+  // would leave a file the researcher deposited sitting on their disk forever,
+  // with a sync that reported success. The two sides have to agree about what
+  // a duplicate is, or one of them silently drops work.
+  const key = (sha, filename) => `${sha}\u0000${filename}`;
+  const have = new Set(
+    remote.filter((r) => r.sha256).map((r) => key(r.sha256, r.filename)),
+  );
 
   const uploaded = [];
   const skipped = [];
   const failed = [];
-  for (const file of depositableFiles(projectId)) {
+  for (const file of local) {
     let sha;
     try {
       sha = await digest(file.path);
@@ -220,7 +244,7 @@ export async function syncProjectToRepo(projectId, { force = false } = {}) {
       failed.push({ filename: file.filename, error: `unreadable: ${err.message}` });
       continue;
     }
-    if (have.has(sha)) {
+    if (have.has(key(sha, file.filename))) {
       skipped.push(file.filename);
       continue;
     }
@@ -234,9 +258,9 @@ export async function syncProjectToRepo(projectId, { force = false } = {}) {
     if (result.ok) {
       uploaded.push(file.filename);
       // Added to the local view immediately: two areas can legitimately hold
-      // the same bytes, and without this the second copy would be uploaded
+      // the same file, and without this the second copy would be uploaded
       // again in the same pass.
-      have.add(sha);
+      have.add(key(sha, file.filename));
     } else {
       failed.push({ filename: file.filename, error: result.error });
     }
