@@ -11,6 +11,7 @@
 // within milliseconds.
 import { listProjects } from "./working-memory.mjs";
 import { scanAllWatchedProjects } from "./project-watch.mjs";
+import { syncAllProjectsToRepo } from "./repo-sync.mjs";
 
 const INTERVAL_MS = 60 * 1000;
 
@@ -48,6 +49,45 @@ async function tick() {
     }
     for (const e of r.errors) {
       console.error(`[${timestamp()}] ${r.projectId}: failed to import ${e.source}: ${e.error}`);
+    }
+  }
+  await depositTick();
+}
+
+/**
+ * The second half of the chain: Vault -> the researcher's project in the Repo.
+ *
+ * AFTER the import scan and in the same tick, so a file that lands in a
+ * watched folder reaches the repository without anything else being run. Only
+ * projects that opted in are touched; syncAllProjectsToRepo skips the rest
+ * without a network call, so this costs nothing for a Node that deposits
+ * nothing.
+ *
+ * Failures are logged and the loop continues. This runs unattended for weeks,
+ * and the Repo being briefly unreachable is an ordinary event -- the next tick
+ * retries, and the sync is idempotent by content, so retrying is free.
+ */
+async function depositTick() {
+  let results;
+  try {
+    results = await syncAllProjectsToRepo(listProjects);
+  } catch (err) {
+    console.error(`[${timestamp()}] repo deposit threw: ${err.message}`);
+    return;
+  }
+  for (const r of results) {
+    if (r.error) {
+      console.error(`[${timestamp()}] ${r.projectId}: repo deposit: ${r.error}`);
+    }
+    if (r.uploaded.length > 0) {
+      console.log(
+        `[${timestamp()}] ${r.projectId}: deposited ${r.uploaded.length} file(s) to the Repo`,
+      );
+    }
+    for (const f of r.failed) {
+      console.error(
+        `[${timestamp()}] ${r.projectId}: failed to deposit ${f.filename}: ${f.error}`,
+      );
     }
   }
 }
