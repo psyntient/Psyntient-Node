@@ -44,6 +44,7 @@ import { readNodeKey } from "./pairing.mjs";
 const ARCHIVE_BASE_URL =
   process.env.PSYNTIENT_ARCHIVE_URL || "https://archive.psyntient.io/api/v1";
 const PROJECT_JSON = ".project.json";
+const DEPOSIT_STATE = ".repo-deposit.json";
 
 // Where a deposit's files live. Deliberately not notes/ or analyses/: those
 // are AUTHORED material with their own meaning and their own writers, and
@@ -97,6 +98,81 @@ export function setRepoSync(projectId, enabled) {
 
 export function repoSyncEnabled(projectId) {
   return readProjectJson(projectId).repoSync === true;
+}
+
+/**
+ * What this Node believes it has already deposited.
+ *
+ * A CACHE FOR DISPLAY, NEVER THE DECISION. The authoritative answer to "does
+ * the Repo have this file" is the Repo's own listing, and syncProjectToRepo
+ * always asks it. This exists so the Vault page can say "12 of 14 deposited"
+ * without a network call -- opening a project should not depend on another
+ * droplet being reachable, and a page that hangs because the Archive is
+ * rebooting is worse than one that shows a slightly stale count.
+ *
+ * Keyed the same way the sync compares -- digest and filename together --
+ * because a display that disagreed with the decision would be a second
+ * opinion about what has been sent.
+ */
+export function depositState(projectId) {
+  assertSafeId(projectId);
+  try {
+    const raw = fs.readFileSync(
+      path.join(vaultProjectDir(projectId), DEPOSIT_STATE),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw);
+    return {
+      deposited: parsed.deposited ?? {},
+      lastRunAt: parsed.lastRunAt ?? null,
+      lastError: parsed.lastError ?? null,
+    };
+  } catch {
+    return { deposited: {}, lastRunAt: null, lastError: null };
+  }
+}
+
+function writeDepositState(projectId, state) {
+  try {
+    fs.writeFileSync(
+      path.join(vaultProjectDir(projectId), DEPOSIT_STATE),
+      JSON.stringify(state, null, 2) + "\n",
+    );
+  } catch {
+    // A display cache that cannot be written is not worth failing a deposit
+    // over. The next run recomputes it from the Repo's listing anyway.
+  }
+}
+
+/**
+ * What turning this on would send, right now.
+ *
+ * THE NUMBER THAT HAS TO BE SHOWN BEFORE THE SWITCH IS FLIPPED. Enabling
+ * deposit does not only affect files that arrive later -- it sends everything
+ * already in the project. On work that has been accumulating for months that
+ * can be many gigabytes leaving for shared storage because a box was ticked,
+ * and "I didn't know it would do that" is not a complaint anyone should have
+ * to make. Local only, so the confirmation never waits on a network call.
+ */
+export function pendingDeposit(projectId) {
+  const { deposited } = depositState(projectId);
+  let files = 0;
+  let bytes = 0;
+  let total = 0;
+  let totalBytes = 0;
+  for (const f of depositableFiles(projectId)) {
+    total += 1;
+    totalBytes += f.bytes;
+    // Matched on name alone here, deliberately: hashing every recording to
+    // render a page would read tens of gigabytes off disk to draw a number.
+    // The sync itself still hashes and still decides.
+    const already = Object.values(deposited).some((d) => d.filename === f.filename);
+    if (!already) {
+      files += 1;
+      bytes += f.bytes;
+    }
+  }
+  return { pending: files, pendingBytes: bytes, total, totalBytes };
 }
 
 /** Every depositable file in a project's Vault directory, with its digest. */
@@ -212,10 +288,14 @@ export async function syncProjectToRepo(
   try {
     remote = await remoteFiles(projectId);
   } catch (err) {
+    const message = `could not read what the Repo already holds: ${err.message}`;
+    const state = depositState(projectId);
+    writeDepositState(projectId, { ...state, lastRunAt: new Date().toISOString(),
+                                   lastError: message });
     return {
       projectId,
       enabled: true,
-      error: `could not read what the Repo already holds: ${err.message}`,
+      error: message,
       uploaded: [],
       skipped: [],
       failed: [],
@@ -236,6 +316,17 @@ export async function syncProjectToRepo(
   const uploaded = [];
   const skipped = [];
   const failed = [];
+  // Rebuilt from the Repo's own listing rather than merged into the old file:
+  // the remote is the truth, and a cache that only ever grew would keep
+  // claiming a withdrawn file was still deposited.
+  const deposited = {};
+  for (const r of remote) {
+    if (r.sha256) {
+      deposited[key(r.sha256, r.filename)] = {
+        filename: r.filename, bytes: r.bytes, at: null,
+      };
+    }
+  }
   for (const file of local) {
     let sha;
     try {
@@ -261,10 +352,19 @@ export async function syncProjectToRepo(
       // the same file, and without this the second copy would be uploaded
       // again in the same pass.
       have.add(key(sha, file.filename));
+      deposited[key(sha, file.filename)] = {
+        filename: file.filename, bytes: file.bytes,
+        at: new Date().toISOString(),
+      };
     } else {
       failed.push({ filename: file.filename, error: result.error });
     }
   }
+  writeDepositState(projectId, {
+    deposited,
+    lastRunAt: new Date().toISOString(),
+    lastError: failed.length ? `${failed.length} file(s) failed` : null,
+  });
   return { projectId, enabled: true, uploaded, skipped, failed };
 }
 

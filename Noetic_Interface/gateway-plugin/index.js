@@ -659,7 +659,26 @@ export default definePluginEntry({
         }
         try {
           const detail = await daemonModule("vault-project.mjs");
-          return sendJson(res, 200, await detail.readProject(projectId, { device }));
+          const body = await detail.readProject(projectId, { device });
+          // Deposit state, from this Node's own records and never from the
+          // network. Opening a project must not depend on the Archive being
+          // reachable; a slightly stale count beats a page that hangs while
+          // another droplet reboots.
+          try {
+            const repo = await daemonModule("repo-sync.mjs");
+            const state = repo.depositState(projectId);
+            body.repoSync = {
+              enabled: repo.repoSyncEnabled(projectId),
+              lastRunAt: state.lastRunAt,
+              lastError: state.lastError,
+              ...repo.pendingDeposit(projectId),
+            };
+          } catch (err) {
+            // A project that is not on this device has no deposit state, and
+            // that is not a reason to fail reading it.
+            body.repoSync = { enabled: false, unavailable: String(err.message ?? err) };
+          }
+          return sendJson(res, 200, body);
         } catch (err) {
           return sendJson(res, 200, {
             ok: false,
@@ -1381,6 +1400,50 @@ export default definePluginEntry({
                   mirror: body.mirror === true,
                 }),
               );
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+
+          // DEPOSIT TO THE REPO. Deliberately its own action rather than a
+          // third flag on set-watch-dir: deleteAfterImport and mirror are
+          // modes OF the watch binding, and this is not one. A project with
+          // no watched folder deposits perfectly well, and folding it into
+          // that form would mean unbinding a folder raised the question of
+          // whether depositing stopped too.
+          if (action === "set-repo-sync") {
+            try {
+              const repo = await daemonModule("repo-sync.mjs");
+              const out = repo.setRepoSync(projectId, body.enabled === true);
+              return sendJson(res, 200, {
+                ok: true,
+                ...out,
+                ...repo.pendingDeposit(projectId),
+              });
+            } catch (err) {
+              return sendJson(res, 400, {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+
+          // RUN IT NOW. The loop polls every 60s, which is right for running
+          // unattended and useless in the moment somebody has just switched
+          // this on and wants to see that it works.
+          if (action === "repo-sync-now") {
+            try {
+              const repo = await daemonModule("repo-sync.mjs");
+              const result = await repo.syncProjectToRepo(projectId, {
+                // Enabling and depositing are one gesture from the page, and
+                // making the caller wait a poll cycle to find out whether the
+                // credential even works is not a kindness.
+                force: body.force === true,
+              });
+              return sendJson(res, 200, { ok: !result.error, ...result });
             } catch (err) {
               return sendJson(res, 400, {
                 ok: false,
