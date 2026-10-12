@@ -1,3 +1,11 @@
+> **Where you are.** One repository in [Psyntient](https://github.com/psyntient) — the platform (accounts, billing,
+> the Node, Cortex, Psyntient Cloud) and **the Noetic Archive**, the research
+> system it hosts. **This repo is Psyntient Node, the researcher's local instrument.**
+>
+> - **Overview of everything** — [github.com/psyntient](https://github.com/psyntient)
+> - **How the Archive droplet fits together** — [psyntient-droplet](https://github.com/psyntient/psyntient-droplet)
+> - **How Psyntient Cloud works** — [psyntient-cloud](https://github.com/psyntient/psyntient-cloud)
+
 # Psyntient Node — hard rules for working in this repo
 
 Psyntient Node is a self-contained app. OpenClaw is bundled **inside**
